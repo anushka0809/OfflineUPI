@@ -1,9 +1,26 @@
 package com.upi.offline.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
+@Schema(description = "Response returned after processing an offline UPI payment")
 public class PaymentResponse {
 
+    @Schema(
+            description = "Unique transaction ID generated for the payment",
+            example = "33ae5ed4-0b52-4069-b64f-df271b00e2f3"
+    )
     private String transactionId;
+
+    @Schema(
+            description = "Current transaction status",
+            example = "DELIVERED_OFFLINE"
+    )
     private String status;
+
+    @Schema(
+            description = "Number of network hops simulated during delivery",
+            example = "2"
+    )
     private Integer hops;
 
     public PaymentResponse() {
