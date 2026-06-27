@@ -42,4 +42,18 @@ public class PaymentService {
     public Transaction getTransaction(Long id) {
         return repository.findById(id).orElse(null);
     }
+
+    public List<Transaction> syncPendingTransactions() {
+
+        List<Transaction> pending =
+                repository.findByStatus("WAITING_FOR_SYNC");
+
+        for (Transaction transaction : pending) {
+            transaction.setStatus("SYNCED");
+        }
+
+        repository.saveAll(pending);
+
+        return pending;
+    }
 }

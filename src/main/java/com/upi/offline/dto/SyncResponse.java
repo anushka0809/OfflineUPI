@@ -2,20 +2,30 @@ package com.upi.offline.dto;
 
 public class SyncResponse {
 
-    private int syncedTransactions;
+    private int syncedCount;
+    private String message;
 
     public SyncResponse() {
     }
 
-    public SyncResponse(int syncedTransactions) {
-        this.syncedTransactions = syncedTransactions;
+    public SyncResponse(int syncedCount, String message) {
+        this.syncedCount = syncedCount;
+        this.message = message;
     }
 
-    public int getSyncedTransactions() {
-        return syncedTransactions;
+    public int getSyncedCount() {
+        return syncedCount;
     }
 
-    public void setSyncedTransactions(int syncedTransactions) {
-        this.syncedTransactions = syncedTransactions;
+    public void setSyncedCount(int syncedCount) {
+        this.syncedCount = syncedCount;
+    }
+
+    public String getMessage() {
+        return message;
+    }
+
+    public void setMessage(String message) {
+        this.message = message;
     }
 }

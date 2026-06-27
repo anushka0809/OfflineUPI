@@ -2,9 +2,12 @@ package com.upi.offline.controller;
 
 import com.upi.offline.dto.PaymentRequest;
 import com.upi.offline.dto.PaymentResponse;
+import com.upi.offline.dto.SyncResponse;
 import com.upi.offline.entity.Transaction;
 import com.upi.offline.service.PaymentService;
+
 import jakarta.validation.Valid;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -31,9 +34,8 @@ public class PaymentController {
         transaction.setTimestamp(LocalDateTime.now());
         transaction.setStatus("PENDING");
         transaction.setHopCount(0);
-        transaction.setEncryptedPayload("");
 
-        service.save(transaction);
+        transaction = service.save(transaction);
 
         return new PaymentResponse(
                 transaction.getTransactionId(),
@@ -43,12 +45,23 @@ public class PaymentController {
     }
 
     @GetMapping("/all")
-    public List<Transaction> all() {
+    public List<Transaction> getAllTransactions() {
         return service.getAllTransactions();
     }
 
     @GetMapping("/{id}")
-    public Transaction one(@PathVariable Long id) {
+    public Transaction getTransaction(@PathVariable Long id) {
         return service.getTransaction(id);
+    }
+
+    @PostMapping("/sync")
+    public SyncResponse syncTransactions() {
+
+        List<Transaction> synced = service.syncPendingTransactions();
+
+        return new SyncResponse(
+                synced.size(),
+                "Pending transactions synced successfully"
+        );
     }
 }
