@@ -25,8 +25,9 @@ public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
         ApiErrorResponse errorResponse = new ApiErrorResponse(
                 HttpStatus.UNAUTHORIZED.value(),
                 "Unauthorized",
-                authException.getMessage()
+                authException.getMessage() != null ? authException.getMessage() : "Authentication required"
         );
+        errorResponse.setPath(request.getRequestURI());
 
         ObjectMapper mapper = new ObjectMapper();
         response.getWriter().write(mapper.writeValueAsString(errorResponse));

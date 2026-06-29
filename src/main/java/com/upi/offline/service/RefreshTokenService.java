@@ -1,6 +1,7 @@
 package com.upi.offline.service;
 
 import com.upi.offline.entity.RefreshToken;
+import com.upi.offline.exception.TokenRefreshException;
 import com.upi.offline.repository.RefreshTokenRepository;
 import com.upi.offline.repository.UserRepository;
 import org.slf4j.Logger;
@@ -57,7 +58,7 @@ public class RefreshTokenService {
         if (token.getExpiryDate().compareTo(Instant.now()) < 0) {
             log.warn("Refresh token was expired for user: {}", token.getUser().getUsername());
             refreshTokenRepository.delete(token);
-            throw new RuntimeException("Refresh token was expired. Please make a new signin request");
+            throw new TokenRefreshException("Refresh token was expired. Please make a new signin request");
         }
         return token;
     }

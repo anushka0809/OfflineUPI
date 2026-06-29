@@ -1,5 +1,6 @@
 package com.upi.offline.service;
 
+import com.upi.offline.entity.Role;
 import com.upi.offline.entity.User;
 import com.upi.offline.repository.UserRepository;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -24,12 +25,17 @@ public class CustomUserDetailsService implements UserDetailsService {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found with username: " + username));
 
-        return new org.springframework.security.core.userdetails.User(
-                user.getUsername(),
-                user.getPassword(),
-                user.getRoles().stream()
+        var authorities = user.getRoles().isEmpty()
+                ? java.util.List.of(new SimpleGrantedAuthority(Role.ROLE_USER.name()))
+                : user.getRoles().stream()
                         .map(role -> new SimpleGrantedAuthority(role.name()))
-                        .collect(Collectors.toList())
-        );
+                        .collect(Collectors.toList());
+
+        return org.springframework.security.core.userdetails.User.builder()
+                .username(user.getUsername())
+                .password(user.getPassword())
+                .disabled(!user.isEnabled())
+                .authorities(authorities)
+                .build();
     }
 }

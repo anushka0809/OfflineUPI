@@ -1,5 +1,6 @@
 package com.upi.offline.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 @Schema(description = "Response returned after processing an offline UPI payment")
@@ -21,6 +22,7 @@ public class PaymentResponse {
             description = "Number of network hops simulated during delivery",
             example = "2"
     )
+    @JsonProperty("hopCount")
     private Integer hops;
 
     public PaymentResponse() {

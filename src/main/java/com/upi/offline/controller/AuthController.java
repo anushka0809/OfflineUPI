@@ -4,6 +4,7 @@ import com.upi.offline.dto.*;
 import com.upi.offline.entity.Role;
 import com.upi.offline.entity.User;
 import com.upi.offline.entity.RefreshToken;
+import com.upi.offline.exception.TokenRefreshException;
 import com.upi.offline.repository.UserRepository;
 import com.upi.offline.security.JwtTokenProvider;
 import com.upi.offline.service.RefreshTokenService;
@@ -97,13 +98,7 @@ public class AuthController {
         user.setPassword(encoder.encode(signUpRequest.getPassword()));
 
         Set<Role> roles = new HashSet<>();
-        String requestedRole = signUpRequest.getRole();
-
-        if (requestedRole != null && requestedRole.equalsIgnoreCase("ADMIN")) {
-            roles.add(Role.ROLE_ADMIN);
-        } else {
-            roles.add(Role.ROLE_USER);
-        }
+        roles.add(Role.ROLE_USER);
 
         user.setRoles(roles);
         userRepository.save(user);
@@ -129,10 +124,7 @@ public class AuthController {
                     RefreshToken newRefreshToken = refreshTokenService.createRefreshToken(user.getId());
                     return new TokenRefreshResponse(token, newRefreshToken.getToken());
                 })
-                .orElseThrow(() -> {
-                    log.error("Refresh token validation failed: token not found");
-                    return new RuntimeException("Refresh token is not in database!");
-                });
+                .orElseThrow(() -> new TokenRefreshException("Refresh token is not in database!"));
 
         log.info("Access token successfully refreshed");
         return ResponseEntity.ok(ApiResponse.success("Token refreshed successfully", response));

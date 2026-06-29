@@ -179,7 +179,7 @@ class AuthControllerTests {
         mockMvc.perform(post("/api/auth/refreshtoken")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(refreshRequest)))
-                .andExpect(status().isInternalServerError())
+                .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.message").value("Refresh token is not in database!"));
     }

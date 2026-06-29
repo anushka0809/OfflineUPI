@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Lock,
   User,
@@ -70,18 +70,40 @@ interface Toast {
   type: 'success' | 'error' | 'info';
 }
 
+function parseStoredRoles(): string[] {
+  try {
+    const raw = localStorage.getItem('roles')
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+async function parseJsonResponse<T>(res: Response): Promise<T | null> {
+  const contentType = res.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) {
+    return null
+  }
+  try {
+    return await res.json() as T
+  } catch {
+    return null
+  }
+}
+
 function App() {
   // Auth State
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'))
   const [, setRefreshToken] = useState<string | null>(localStorage.getItem('refreshToken'))
   const [username, setUsername] = useState<string | null>(localStorage.getItem('username'))
-  const [roles, setRoles] = useState<string[]>(JSON.parse(localStorage.getItem('roles') || '[]'))
+  const [roles, setRoles] = useState<string[]>(parseStoredRoles())
 
   // UI State
   const [isLogin, setIsLogin] = useState<boolean>(true)
   const [authUsername, setAuthUsername] = useState<string>('')
   const [authPassword, setAuthPassword] = useState<string>('')
-  const [authRole, setAuthRole] = useState<string>('USER')
   const [currentTab, setCurrentTab] = useState<'send' | 'history' | 'admin'>('send')
   const [toasts, setToasts] = useState<Toast[]>([])
 
@@ -113,6 +135,19 @@ function App() {
 
   const isAdmin = roles.includes('ROLE_ADMIN')
 
+  const clearAuthState = useCallback(() => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('refreshToken')
+    localStorage.removeItem('username')
+    localStorage.removeItem('roles')
+    setToken(null)
+    setRefreshToken(null)
+    setUsername(null)
+    setRoles([])
+  }, [])
+
+  const refreshPromiseRef = useRef<Promise<boolean> | null>(null)
+
   // Toast System Helper
   const addToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Date.now()
@@ -130,51 +165,76 @@ function App() {
     if (currentToken) {
       headers.set('Authorization', `Bearer ${currentToken}`)
     }
-    if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
+    const isGetOrHead = !options.method || options.method === 'GET' || options.method === 'HEAD'
+    if (!isGetOrHead && !headers.has('Content-Type') && !(options.body instanceof FormData)) {
       headers.set('Content-Type', 'application/json')
     }
 
     const response = await fetch(url, { ...options, headers })
 
-    if (response.status === 401 && localStorage.getItem('refreshToken')) {
-      // Access token expired, attempt rotation
-      try {
-        const refreshRes = await fetch('/api/auth/refreshtoken', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken: localStorage.getItem('refreshToken') })
-        })
+    if (response.status !== 401) {
+      return response
+    }
 
-        if (refreshRes.ok) {
-          const refreshData: ApiResponse<TokenRefreshResponse> = await refreshRes.json()
-          const newAccessToken = refreshData.data.accessToken
-          const newRefreshToken = refreshData.data.refreshToken
-
-          localStorage.setItem('token', newAccessToken)
-          localStorage.setItem('refreshToken', newRefreshToken)
-          setToken(newAccessToken)
-          setRefreshToken(newRefreshToken)
-
-          // Retry the original request
-          headers.set('Authorization', `Bearer ${newAccessToken}`)
-          return fetch(url, { ...options, headers })
-        }
-      } catch (err) {
-        console.error("Token refresh failed", err)
-      }
-
-      // If refresh fails, clear auth state
-      localStorage.clear()
-      setToken(null)
-      setRefreshToken(null)
-      setUsername(null)
-      setRoles([])
+    const storedRefreshToken = localStorage.getItem('refreshToken')
+    if (!storedRefreshToken) {
+      clearAuthState()
       addToast("Session expired. Please log in again.", 'error')
       throw new Error("Unauthorized")
     }
 
-    return response;
-  }, [addToast])
+    if (!refreshPromiseRef.current) {
+      refreshPromiseRef.current = (async () => {
+        try {
+          const refreshRes = await fetch('/api/auth/refreshtoken', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken: storedRefreshToken })
+          })
+
+          if (!refreshRes.ok) {
+            return false
+          }
+
+          const refreshData = await parseJsonResponse<ApiResponse<TokenRefreshResponse>>(refreshRes)
+          if (!refreshData?.data?.accessToken) {
+            return false
+          }
+
+          localStorage.setItem('token', refreshData.data.accessToken)
+          localStorage.setItem('refreshToken', refreshData.data.refreshToken)
+          setToken(refreshData.data.accessToken)
+          setRefreshToken(refreshData.data.refreshToken)
+          return true
+        } catch {
+          return false
+        } finally {
+          refreshPromiseRef.current = null
+        }
+      })()
+    }
+
+    const refreshed = await refreshPromiseRef.current
+    if (!refreshed) {
+      clearAuthState()
+      addToast("Session expired. Please log in again.", 'error')
+      throw new Error("Unauthorized")
+    }
+
+    const newToken = localStorage.getItem('token')
+    if (newToken) {
+      headers.set('Authorization', `Bearer ${newToken}`)
+    }
+    const retryResponse = await fetch(url, { ...options, headers })
+
+    if (retryResponse.status === 401) {
+      clearAuthState()
+      addToast("Session expired. Please log in again.", 'error')
+      throw new Error("Unauthorized")
+    }
+
+    return retryResponse
+  }, [addToast, clearAuthState])
 
   // Authentication Handlers
   const handleAuth = async (e: React.FormEvent) => {
@@ -191,7 +251,12 @@ function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username: authUsername, password: authPassword })
         })
-        const result = await res.json()
+        const result = await parseJsonResponse<ApiResponse<JwtResponse>>(res)
+
+        if (!result) {
+          addToast("Login failed: server returned a non-JSON response", 'error')
+          return
+        }
 
         if (res.ok && result.success) {
           const { token, refreshToken, username, roles } = result.data as JwtResponse
@@ -213,9 +278,14 @@ function App() {
         const res = await fetch('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: authUsername, password: authPassword, role: authRole })
+          body: JSON.stringify({ username: authUsername, password: authPassword, role: 'USER' })
         })
-        const result = await res.json()
+        const result = await parseJsonResponse<ApiResponse<string>>(res)
+
+        if (!result) {
+          addToast("Registration failed: server returned a non-JSON response", 'error')
+          return
+        }
 
         if (res.ok && result.success) {
           addToast("Registration successful! You can now log in.", 'success')
@@ -231,11 +301,7 @@ function App() {
   }
 
   const handleLogout = () => {
-    localStorage.clear()
-    setToken(null)
-    setRefreshToken(null)
-    setUsername(null)
-    setRoles([])
+    clearAuthState()
     addToast("Logged out successfully", 'info')
   }
 
@@ -339,7 +405,7 @@ function App() {
             success: true,
             transactionId: result.data.transactionId,
             status: result.data.status,
-            hopCount: result.data.hopCount,
+            hopCount: result.data.hopCount ?? result.data.hops,
             payload: `AES-128 Ciphertext:\n${btoa(rawPayload).substring(0, 48)}... (Encrypted & Saved)`
           })
           addToast("Payment saved offline!", 'success')
@@ -488,20 +554,9 @@ function App() {
             </div>
 
             {!isLogin && (
-              <div className="form-group">
-                <label className="form-label">User Role</label>
-                <div className="input-container">
-                  <Shield size={16} className="input-icon" />
-                  <select
-                    className="form-input"
-                    value={authRole}
-                    onChange={(e) => setAuthRole(e.target.value)}
-                  >
-                    <option value="USER">User (Standard)</option>
-                    <option value="ADMIN">Administrator</option>
-                  </select>
-                </div>
-              </div>
+              <p style={{ fontSize: 13, color: 'var(--neutral-400)', marginBottom: 16 }}>
+                New accounts are registered as standard users.
+              </p>
             )}
 
             <button type="submit" className="btn-primary">

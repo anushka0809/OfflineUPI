@@ -1,0 +1,10 @@
+target/
+frontend/
+.git/
+.github/
+.idea/
+*.md
+.gitignore
+.gitattributes
+docker-compose.yml
+Dockerfile
