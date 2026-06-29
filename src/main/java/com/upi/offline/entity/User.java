@@ -27,6 +27,12 @@ public class User {
     @Column(nullable = false)
     private boolean enabled = true;
 
+    @Column(nullable = false)
+    private Double balance = 10000.0;
+
+    @Column(name = "upi_id", unique = true)
+    private String upiId;
+
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "user_roles", joinColumns = @JoinColumn(name = "user_id"))
     @Enumerated(EnumType.STRING)
@@ -81,5 +87,21 @@ public class User {
 
     public void setRoles(Set<Role> roles) {
         this.roles = roles;
+    }
+
+    public Double getBalance() {
+        return balance;
+    }
+
+    public void setBalance(Double balance) {
+        this.balance = balance;
+    }
+
+    public String getUpiId() {
+        return upiId;
+    }
+
+    public void setUpiId(String upiId) {
+        this.upiId = upiId;
     }
 }

@@ -62,6 +62,30 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(response, HttpStatus.NOT_FOUND);
     }
 
+    @ExceptionHandler(InsufficientBalanceException.class)
+    public ResponseEntity<ApiErrorResponse> handleInsufficientBalance(InsufficientBalanceException ex, HttpServletRequest request) {
+        log.warn("Insufficient balance at path '{}': {}", request.getRequestURI(), ex.getMessage());
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.BAD_REQUEST.value(),
+                "Insufficient Balance",
+                ex.getMessage()
+        );
+        response.setPath(request.getRequestURI());
+        return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(UnauthorizedAccessException.class)
+    public ResponseEntity<ApiErrorResponse> handleUnauthorizedAccess(UnauthorizedAccessException ex, HttpServletRequest request) {
+        log.warn("Unauthorized access at path '{}': {}", request.getRequestURI(), ex.getMessage());
+        ApiErrorResponse response = new ApiErrorResponse(
+                HttpStatus.FORBIDDEN.value(),
+                "Forbidden",
+                ex.getMessage()
+        );
+        response.setPath(request.getRequestURI());
+        return new ResponseEntity<>(response, HttpStatus.FORBIDDEN);
+    }
+
     @ExceptionHandler(InvalidTransactionException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidTransaction(InvalidTransactionException ex, HttpServletRequest request) {
         log.error("Invalid transaction at path '{}': {}", request.getRequestURI(), ex.getMessage());

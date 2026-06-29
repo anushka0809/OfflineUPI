@@ -1,73 +1,93 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  Lock,
-  User,
-  Shield,
-  Send,
-  History,
-  LogOut,
-  CheckCircle2,
-  AlertTriangle,
-  RefreshCw,
-  XCircle,
-  Search,
-  ChevronLeft,
-  ChevronRight,
-  Download,
-  BarChart3,
-  Radio,
-  Info,
-  DollarSign
+  Lock, User, Shield, Send, History, LogOut, CheckCircle2, AlertTriangle,
+  RefreshCw, XCircle, Search, ChevronLeft, ChevronRight, Download, BarChart3,
+  Radio, Info, Wallet, Users, Receipt, Calendar, Home, IndianRupee, Plus, Trash2, Zap
 } from 'lucide-react'
 
-// API response types
 interface ApiResponse<T> {
-  success: boolean;
-  message: string;
-  data: T;
+  success: boolean
+  message: string
+  data: T
 }
 
 interface JwtResponse {
-  token: string;
-  refreshToken: string;
-  username: string;
-  roles: string[];
+  token: string
+  refreshToken: string
+  username: string
+  roles: string[]
 }
 
 interface TokenRefreshResponse {
-  accessToken: string;
-  refreshToken: string;
+  accessToken: string
+  refreshToken: string
+}
+
+interface WalletData {
+  username: string
+  upiId: string
+  balance: number
+  monthlySpent: number
+  monthlyReceived: number
+}
+
+interface MonthlySummary {
+  month: string
+  totalSpent: number
+  totalReceived: number
+  transactionCount: number
+  categoryBreakdown: Record<string, number>
+  dailyActivity: Record<string, number>
 }
 
 interface Transaction {
-  id: number;
-  transactionId: string;
-  sender: string;
-  receiver: string;
-  amount: number;
-  status: string;
-  hopCount: number;
-  createdAt: string;
-  syncTime: string | null;
-  failureReason: string | null;
-  encryptedPayload: string | null;
+  id: number
+  transactionId: string
+  sender: string
+  receiver: string
+  amount: number
+  status: string
+  hopCount: number
+  createdAt: string
+  syncTime: string | null
+  failureReason: string | null
+  transactionType?: string
+  category?: string
+  note?: string
+}
+
+interface BillReminder {
+  id: number
+  title: string
+  amount: number
+  category: string
+  dueDay: number
+  active: boolean
 }
 
 interface AdminStatsResponse {
-  totalTransactions: number;
-  pendingCount: number;
-  syncedCount: number;
-  failedCount: number;
-  successRate: number;
-  totalAmount: number;
-  dailyTransactions: Record<string, number>;
-  monthlyTransactions: Record<string, number>;
+  totalTransactions: number
+  pendingCount: number
+  syncedCount: number
+  failedCount: number
+  successRate: number
+  totalAmount: number
+  dailyTransactions: Record<string, number>
+  monthlyTransactions: Record<string, number>
 }
 
 interface Toast {
-  id: number;
-  message: string;
-  type: 'success' | 'error' | 'info';
+  id: number
+  message: string
+  type: 'success' | 'error' | 'info'
+}
+
+type Tab = 'home' | 'send' | 'split' | 'bills' | 'history' | 'admin'
+
+const CATEGORIES = ['FOOD', 'RENT', 'UTILITIES', 'SHOPPING', 'TRAVEL', 'ENTERTAINMENT', 'SPLIT', 'OTHER']
+
+function formatCurrency(amount: number): string {
+  return '₹' + amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function parseStoredRoles(): string[] {
@@ -83,9 +103,7 @@ function parseStoredRoles(): string[] {
 
 async function parseJsonResponse<T>(res: Response): Promise<T | null> {
   const contentType = res.headers.get('content-type') || ''
-  if (!contentType.includes('application/json')) {
-    return null
-  }
+  if (!contentType.includes('application/json')) return null
   try {
     return await res.json() as T
   } catch {
@@ -94,46 +112,61 @@ async function parseJsonResponse<T>(res: Response): Promise<T | null> {
 }
 
 function App() {
-  // Auth State
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'))
   const [, setRefreshToken] = useState<string | null>(localStorage.getItem('refreshToken'))
   const [username, setUsername] = useState<string | null>(localStorage.getItem('username'))
   const [roles, setRoles] = useState<string[]>(parseStoredRoles())
 
-  // UI State
-  const [isLogin, setIsLogin] = useState<boolean>(true)
-  const [authUsername, setAuthUsername] = useState<string>('')
-  const [authPassword, setAuthPassword] = useState<string>('')
-  const [currentTab, setCurrentTab] = useState<'send' | 'history' | 'admin'>('send')
+  const [isLogin, setIsLogin] = useState(true)
+  const [authUsername, setAuthUsername] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [currentTab, setCurrentTab] = useState<Tab>('home')
   const [toasts, setToasts] = useState<Toast[]>([])
 
-  // Form State
-  const [receiver, setReceiver] = useState<string>('')
-  const [amount, setAmount] = useState<string>('')
-  const [sendingPayment, setSendingPayment] = useState<boolean>(false)
+  const [wallet, setWallet] = useState<WalletData | null>(null)
+  const [monthlySummary, setMonthlySummary] = useState<MonthlySummary | null>(null)
+  const [allUsers, setAllUsers] = useState<string[]>([])
+
+  const [receiver, setReceiver] = useState('')
+  const [amount, setAmount] = useState('')
+  const [category, setCategory] = useState('OTHER')
+  const [note, setNote] = useState('')
+  const [sendingPayment, setSendingPayment] = useState(false)
   const [lastPaymentResult, setLastPaymentResult] = useState<{
-    success: boolean;
-    transactionId?: string;
-    status?: string;
-    hopCount?: number;
-    payload?: string;
+    success: boolean; transactionId?: string; status?: string; hopCount?: number; payload?: string
   } | null>(null)
 
-  // History State
-  const [history, setHistory] = useState<Transaction[]>([])
-  const [historyPage, setHistoryPage] = useState<number>(0)
-  const [historyTotalPages, setHistoryTotalPages] = useState<number>(0)
-  const [historyTotalElements, setHistoryTotalElements] = useState<number>(0)
-  const [filterStatus, setFilterStatus] = useState<string>('')
-  const [filterSearch, setFilterSearch] = useState<string>('')
-  const [loadingHistory, setLoadingHistory] = useState<boolean>(false)
+  const [splitAmount, setSplitAmount] = useState('')
+  const [splitParticipants, setSplitParticipants] = useState('')
+  const [splitDescription, setSplitDescription] = useState('')
+  const [splitting, setSplitting] = useState(false)
 
-  // Admin State
+  const [bills, setBills] = useState<BillReminder[]>([])
+  const [billTitle, setBillTitle] = useState('')
+  const [billAmount, setBillAmount] = useState('')
+  const [billCategory, setBillCategory] = useState('UTILITIES')
+  const [billDueDay, setBillDueDay] = useState('1')
+
+  const [history, setHistory] = useState<Transaction[]>([])
+  const [historyPage, setHistoryPage] = useState(0)
+  const [historyTotalPages, setHistoryTotalPages] = useState(0)
+  const [historyTotalElements, setHistoryTotalElements] = useState(0)
+  const [filterStatus, setFilterStatus] = useState('')
+  const [filterSearch, setFilterSearch] = useState('')
+  const [loadingHistory, setLoadingHistory] = useState(false)
+
   const [stats, setStats] = useState<AdminStatsResponse | null>(null)
-  const [syncing, setSyncing] = useState<boolean>(false)
-  const [loadingStats, setLoadingStats] = useState<boolean>(false)
+  const [syncing, setSyncing] = useState(false)
+  const [loadingStats, setLoadingStats] = useState(false)
 
   const isAdmin = roles.includes('ROLE_ADMIN')
+  const refreshPromiseRef = useRef<Promise<boolean> | null>(null)
+
+  const addToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Date.now()
+    setToasts(prev => [...prev, { id, message, type }])
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000)
+  }, [])
 
   const clearAuthState = useCallback(() => {
     localStorage.removeItem('token')
@@ -144,43 +177,26 @@ function App() {
     setRefreshToken(null)
     setUsername(null)
     setRoles([])
+    setWallet(null)
   }, [])
 
-  const refreshPromiseRef = useRef<Promise<boolean> | null>(null)
-
-  // Toast System Helper
-  const addToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    const id = Date.now()
-    setToasts((prev) => [...prev, { id, message, type }])
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id))
-    }, 4000)
-  }, [])
-
-  // Custom authenticated fetch helper with auto-refresh rotation
   const fetchWithAuth = useCallback(async (url: string, options: RequestInit = {}): Promise<Response> => {
     const headers = new Headers(options.headers || {})
-    let currentToken = localStorage.getItem('token')
-
-    if (currentToken) {
-      headers.set('Authorization', `Bearer ${currentToken}`)
-    }
+    const currentToken = localStorage.getItem('token')
+    if (currentToken) headers.set('Authorization', `Bearer ${currentToken}`)
     const isGetOrHead = !options.method || options.method === 'GET' || options.method === 'HEAD'
     if (!isGetOrHead && !headers.has('Content-Type') && !(options.body instanceof FormData)) {
       headers.set('Content-Type', 'application/json')
     }
 
     const response = await fetch(url, { ...options, headers })
-
-    if (response.status !== 401) {
-      return response
-    }
+    if (response.status !== 401) return response
 
     const storedRefreshToken = localStorage.getItem('refreshToken')
     if (!storedRefreshToken) {
       clearAuthState()
-      addToast("Session expired. Please log in again.", 'error')
-      throw new Error("Unauthorized")
+      addToast('Session expired. Please log in again.', 'error')
+      throw new Error('Unauthorized')
     }
 
     if (!refreshPromiseRef.current) {
@@ -191,16 +207,9 @@ function App() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ refreshToken: storedRefreshToken })
           })
-
-          if (!refreshRes.ok) {
-            return false
-          }
-
+          if (!refreshRes.ok) return false
           const refreshData = await parseJsonResponse<ApiResponse<TokenRefreshResponse>>(refreshRes)
-          if (!refreshData?.data?.accessToken) {
-            return false
-          }
-
+          if (!refreshData?.data?.accessToken) return false
           localStorage.setItem('token', refreshData.data.accessToken)
           localStorage.setItem('refreshToken', refreshData.data.refreshToken)
           setToken(refreshData.data.accessToken)
@@ -217,281 +226,339 @@ function App() {
     const refreshed = await refreshPromiseRef.current
     if (!refreshed) {
       clearAuthState()
-      addToast("Session expired. Please log in again.", 'error')
-      throw new Error("Unauthorized")
+      addToast('Session expired. Please log in again.', 'error')
+      throw new Error('Unauthorized')
     }
 
     const newToken = localStorage.getItem('token')
-    if (newToken) {
-      headers.set('Authorization', `Bearer ${newToken}`)
-    }
+    if (newToken) headers.set('Authorization', `Bearer ${newToken}`)
     const retryResponse = await fetch(url, { ...options, headers })
-
     if (retryResponse.status === 401) {
       clearAuthState()
-      addToast("Session expired. Please log in again.", 'error')
-      throw new Error("Unauthorized")
+      addToast('Session expired. Please log in again.', 'error')
+      throw new Error('Unauthorized')
     }
-
     return retryResponse
   }, [addToast, clearAuthState])
 
-  // Authentication Handlers
-  const handleAuth = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!authUsername || !authPassword) {
-      addToast("Please fill in all fields", 'error')
-      return
-    }
-
+  const fetchWallet = useCallback(async () => {
     try {
-      if (isLogin) {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: authUsername, password: authPassword })
-        })
-        const result = await parseJsonResponse<ApiResponse<JwtResponse>>(res)
+      const res = await fetchWithAuth('/api/wallet/balance')
+      const result = await parseJsonResponse<ApiResponse<WalletData>>(res)
+      if (res.ok && result?.data) setWallet(result.data)
+    } catch { /* handled by fetchWithAuth */ }
+  }, [fetchWithAuth])
 
-        if (!result) {
-          addToast("Login failed: server returned a non-JSON response", 'error')
-          return
-        }
+  const fetchMonthlySummary = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth('/api/wallet/monthly-summary')
+      const result = await parseJsonResponse<ApiResponse<MonthlySummary>>(res)
+      if (res.ok && result?.data) setMonthlySummary(result.data)
+    } catch { /* handled */ }
+  }, [fetchWithAuth])
 
-        if (res.ok && result.success) {
-          const { token, refreshToken, username, roles } = result.data as JwtResponse
-          localStorage.setItem('token', token)
-          localStorage.setItem('refreshToken', refreshToken)
-          localStorage.setItem('username', username)
-          localStorage.setItem('roles', JSON.stringify(roles))
-
-          setToken(token)
-          setRefreshToken(refreshToken)
-          setUsername(username)
-          setRoles(roles)
-          addToast(`Welcome back, ${username}!`, 'success')
-          setAuthPassword('')
-        } else {
-          addToast(result.message || "Login failed", 'error')
-        }
-      } else {
-        const res = await fetch('/api/auth/register', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: authUsername, password: authPassword, role: 'USER' })
-        })
-        const result = await parseJsonResponse<ApiResponse<string>>(res)
-
-        if (!result) {
-          addToast("Registration failed: server returned a non-JSON response", 'error')
-          return
-        }
-
-        if (res.ok && result.success) {
-          addToast("Registration successful! You can now log in.", 'success')
-          setIsLogin(true)
-          setAuthPassword('')
-        } else {
-          addToast(result.message || "Registration failed", 'error')
-        }
+  const fetchUsers = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth('/api/wallet/users')
+      const result = await parseJsonResponse<ApiResponse<string[]>>(res)
+      if (res.ok && result?.data) {
+        setAllUsers(result.data.filter(u => u !== username))
       }
-    } catch (err: any) {
-      addToast("Authentication request failed: " + err.message, 'error')
-    }
-  }
+    } catch { /* handled */ }
+  }, [fetchWithAuth, username])
 
-  const handleLogout = () => {
-    clearAuthState()
-    addToast("Logged out successfully", 'info')
-  }
+  const fetchBills = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth('/api/wallet/bills')
+      const result = await parseJsonResponse<ApiResponse<BillReminder[]>>(res)
+      if (res.ok && result?.data) setBills(result.data)
+    } catch { /* handled */ }
+  }, [fetchWithAuth])
 
-  // Load User Transaction History
-  const fetchHistory = useCallback(async (page: number = 0) => {
+  const fetchHistory = useCallback(async (page = 0) => {
     setLoadingHistory(true)
     try {
-      let url = `/api/payment/history?page=${page}&size=6&sort=createdAt,desc`
+      let url = `/api/payment/history?page=${page}&size=8&sort=createdAt,desc`
       if (filterStatus) url += `&status=${filterStatus}`
       if (filterSearch) url += `&search=${encodeURIComponent(filterSearch)}`
-
       const res = await fetchWithAuth(url)
-      if (res.ok) {
-        const result: ApiResponse<any> = await res.json()
+      const result = await parseJsonResponse<ApiResponse<{ content: Transaction[]; number: number; totalPages: number; totalElements: number }>>(res)
+      if (res.ok && result?.data) {
         setHistory(result.data.content)
         setHistoryPage(result.data.number)
         setHistoryTotalPages(result.data.totalPages)
         setHistoryTotalElements(result.data.totalElements)
       } else {
-        addToast("Failed to fetch transaction history", 'error')
+        addToast('Failed to fetch transaction history', 'error')
       }
-    } catch (err) {
-      console.error(err)
     } finally {
       setLoadingHistory(false)
     }
   }, [fetchWithAuth, filterStatus, filterSearch, addToast])
 
-  // Load Admin Metrics Dashboard
   const fetchStats = useCallback(async () => {
     if (!isAdmin) return
     setLoadingStats(true)
     try {
       const res = await fetchWithAuth('/api/payment/stats')
-      if (res.ok) {
-        const result: ApiResponse<AdminStatsResponse> = await res.json()
-        setStats(result.data)
-      } else {
-        addToast("Failed to fetch admin stats", 'error')
-      }
-    } catch (err) {
-      console.error(err)
+      const result = await parseJsonResponse<ApiResponse<AdminStatsResponse>>(res)
+      if (res.ok && result?.data) setStats(result.data)
+      else addToast('Failed to fetch admin stats', 'error')
     } finally {
       setLoadingStats(false)
     }
   }, [fetchWithAuth, isAdmin, addToast])
 
-  // Trigger loading relevant tab data
   useEffect(() => {
-    if (token) {
-      if (currentTab === 'history') {
-        fetchHistory(0)
-      } else if (currentTab === 'admin' && isAdmin) {
-        fetchStats()
-      }
-    }
-  }, [token, currentTab, fetchHistory, fetchStats, isAdmin])
+    if (!token) return
+    fetchWallet()
+    fetchUsers()
+  }, [token, fetchWallet, fetchUsers])
 
-  // Send Money Handler
+  useEffect(() => {
+    if (!token) return
+    if (currentTab === 'home') fetchMonthlySummary()
+    else if (currentTab === 'history') fetchHistory(0)
+    else if (currentTab === 'bills') fetchBills()
+    else if (currentTab === 'admin' && isAdmin) fetchStats()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, currentTab, isAdmin])
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!authUsername || !authPassword) {
+      addToast('Please fill in all fields', 'error')
+      return
+    }
+    try {
+      const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register'
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: authUsername, password: authPassword, role: 'USER' })
+      })
+      const result = await parseJsonResponse<ApiResponse<JwtResponse | string>>(res)
+      if (!result) {
+        addToast('Server returned a non-JSON response', 'error')
+        return
+      }
+      if (isLogin) {
+        if (res.ok && result.success) {
+          const data = result.data as JwtResponse
+          localStorage.setItem('token', data.token)
+          localStorage.setItem('refreshToken', data.refreshToken)
+          localStorage.setItem('username', data.username)
+          localStorage.setItem('roles', JSON.stringify(data.roles))
+          setToken(data.token)
+          setRefreshToken(data.refreshToken)
+          setUsername(data.username)
+          setRoles(data.roles)
+          addToast(`Welcome back, ${data.username}!`, 'success')
+          setAuthPassword('')
+        } else {
+          addToast(result.message || 'Login failed', 'error')
+        }
+      } else {
+        if (res.ok && result.success) {
+          addToast('Registration successful! You can now log in.', 'success')
+          setIsLogin(true)
+          setAuthPassword('')
+        } else {
+          addToast(result.message || 'Registration failed', 'error')
+        }
+      }
+    } catch (err: unknown) {
+      addToast('Authentication failed: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error')
+    }
+  }
+
+  const handleLogout = async () => {
+    const rt = localStorage.getItem('refreshToken')
+    try {
+      if (rt) {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: rt })
+        })
+      }
+    } catch { /* ignore */ }
+    clearAuthState()
+    addToast('Logged out successfully', 'info')
+  }
+
   const handleSendPayment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!receiver || !amount) {
-      addToast("Please fill in all transaction fields", 'error')
+      addToast('Please fill in all fields', 'error')
       return
     }
-    if (isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
-      addToast("Please enter a valid amount greater than zero", 'error')
+    const amt = parseFloat(amount)
+    if (isNaN(amt) || amt <= 0) {
+      addToast('Enter a valid amount', 'error')
       return
     }
-
     setSendingPayment(true)
-    setLastPaymentResult(null)
-
-    // Formulate a representation of offline payload
-    const rawPayload = `${username || 'sender'}|${receiver}|${parseFloat(amount)}`
-
-    // Initial display of payload encryption
-    setLastPaymentResult({
-      success: false,
-      payload: `Encrypting offline payload: "${rawPayload}"...`
-    })
-
+    setLastPaymentResult({ success: false, payload: 'Encrypting offline payload...' })
     try {
       const res = await fetchWithAuth('/api/payment/send', {
         method: 'POST',
-        body: JSON.stringify({
-          sender: username,
-          receiver,
-          amount: parseFloat(amount)
-        })
+        body: JSON.stringify({ receiver, amount: amt, category, note: note || undefined })
       })
-      const result = await res.json()
-
-      if (res.ok && result.success) {
-        // Find the transaction record to show the real encrypted payload
-
-        try {
-          // Find transaction database ID, or fetch details. Wait, the controller returns transactionId, status, and hopCount
-          // We can show this return value directly
-          setLastPaymentResult({
-            success: true,
-            transactionId: result.data.transactionId,
-            status: result.data.status,
-            hopCount: result.data.hopCount ?? result.data.hops,
-            payload: `AES-128 Ciphertext:\n${btoa(rawPayload).substring(0, 48)}... (Encrypted & Saved)`
-          })
-          addToast("Payment saved offline!", 'success')
-          setReceiver('')
-          setAmount('')
-        } catch (innerErr) { }
-      } else {
+      const result = await parseJsonResponse<ApiResponse<{ transactionId: string; status: string; hopCount: number }>>(res)
+      if (res.ok && result?.success && result.data) {
         setLastPaymentResult({
-          success: false,
-          payload: `Error: ${result.message || "Failed to submit offline transaction"}`
+          success: true,
+          transactionId: result.data.transactionId,
+          status: result.data.status,
+          hopCount: result.data.hopCount,
+          payload: `Payment of ${formatCurrency(amt)} to ${receiver} encrypted & saved offline.`
         })
-        addToast(result.message || "Payment failed", 'error')
+        addToast('Payment saved offline!', 'success')
+        setReceiver('')
+        setAmount('')
+        setNote('')
+        fetchWallet()
+      } else {
+        addToast(result?.message || 'Payment failed', 'error')
+        setLastPaymentResult({ success: false, payload: result?.message || 'Payment failed' })
       }
-    } catch (err: any) {
-      setLastPaymentResult({
-        success: false,
-        payload: `Exception: ${err.message}`
-      })
-      addToast("Failed to process payment: " + err.message, 'error')
+    } catch (err: unknown) {
+      addToast('Payment failed: ' + (err instanceof Error ? err.message : 'Error'), 'error')
     } finally {
       setSendingPayment(false)
     }
   }
 
-  // Admin Synchronize Handler
+  const handleSplit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const total = parseFloat(splitAmount)
+    if (isNaN(total) || total <= 0) {
+      addToast('Enter a valid total amount', 'error')
+      return
+    }
+    const participants = splitParticipants.split(',').map(p => p.trim()).filter(Boolean)
+    if (participants.length === 0) {
+      addToast('Add at least one participant', 'error')
+      return
+    }
+    setSplitting(true)
+    try {
+      const res = await fetchWithAuth('/api/payment/split', {
+        method: 'POST',
+        body: JSON.stringify({
+          totalAmount: total,
+          participants,
+          description: splitDescription || 'Split expense',
+          category: 'SPLIT'
+        })
+      })
+      const result = await parseJsonResponse<ApiResponse<{ sharePerPerson: number; participantCount: number; transactions: unknown[] }>>(res)
+      if (res.ok && result?.success && result.data) {
+        addToast(`Split created! Each person owes ${formatCurrency(result.data.sharePerPerson)}`, 'success')
+        setSplitAmount('')
+        setSplitParticipants('')
+        setSplitDescription('')
+        fetchWallet()
+      } else {
+        addToast(result?.message || 'Split failed', 'error')
+      }
+    } catch (err: unknown) {
+      addToast('Split failed: ' + (err instanceof Error ? err.message : 'Error'), 'error')
+    } finally {
+      setSplitting(false)
+    }
+  }
+
+  const handleAddBill = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const amt = parseFloat(billAmount)
+    if (!billTitle || isNaN(amt) || amt <= 0) {
+      addToast('Fill in bill title and amount', 'error')
+      return
+    }
+    try {
+      const res = await fetchWithAuth('/api/wallet/bills', {
+        method: 'POST',
+        body: JSON.stringify({ title: billTitle, amount: amt, category: billCategory, dueDay: parseInt(billDueDay) })
+      })
+      const result = await parseJsonResponse<ApiResponse<BillReminder>>(res)
+      if (res.ok && result?.success) {
+        addToast('Bill reminder added!', 'success')
+        setBillTitle('')
+        setBillAmount('')
+        fetchBills()
+      } else {
+        addToast(result?.message || 'Failed to add bill', 'error')
+      }
+    } catch (err: unknown) {
+      addToast('Failed: ' + (err instanceof Error ? err.message : 'Error'), 'error')
+    }
+  }
+
+  const handleDeleteBill = async (id: number) => {
+    try {
+      const res = await fetchWithAuth(`/api/wallet/bills/${id}`, { method: 'DELETE' })
+      const result = await parseJsonResponse<ApiResponse<string>>(res)
+      if (res.ok && result?.success) {
+        addToast('Bill removed', 'info')
+        fetchBills()
+      }
+    } catch { /* handled */ }
+  }
+
   const handleSync = async () => {
     setSyncing(true)
-    addToast("Initiating batch synchronization simulation...", 'info')
+    addToast('Syncing offline transactions...', 'info')
     try {
       const res = await fetchWithAuth('/api/payment/sync', { method: 'POST' })
-      const result = await res.json()
-
-      if (res.ok && result.success) {
-        addToast(`${result.data.syncedCount} transactions successfully processed!`, 'success')
-        fetchStats() // refresh stats
+      const result = await parseJsonResponse<ApiResponse<{ syncedCount: number }>>(res)
+      if (res.ok && result?.success) {
+        addToast(`${result.data?.syncedCount ?? 0} transactions synced!`, 'success')
+        fetchStats()
+        fetchWallet()
       } else {
-        addToast(result.message || "Sync failed", 'error')
+        addToast(result?.message || 'Sync failed', 'error')
       }
-    } catch (err: any) {
-      addToast("Network sync failed: " + err.message, 'error')
     } finally {
       setSyncing(false)
     }
   }
 
-  // Retry / Cancel Actions
   const handleRetry = async (id: number) => {
     try {
       const res = await fetchWithAuth(`/api/payment/retry/${id}`, { method: 'POST' })
-      const result = await res.json()
-      if (res.ok && result.success) {
-        addToast("Transaction set back to WAITING_FOR_SYNC", 'success')
+      const result = await parseJsonResponse<ApiResponse<unknown>>(res)
+      if (res.ok && result?.success) {
+        addToast('Transaction queued for retry', 'success')
         fetchHistory(historyPage)
       } else {
-        addToast(result.message || "Retry failed", 'error')
+        addToast(result?.message || 'Retry failed', 'error')
       }
-    } catch (err: any) {
-      addToast("Action failed: " + err.message, 'error')
+    } catch (err: unknown) {
+      addToast('Action failed', 'error')
     }
   }
 
   const handleCancel = async (id: number) => {
     try {
       const res = await fetchWithAuth(`/api/payment/cancel/${id}`, { method: 'POST' })
-      const result = await res.json()
-      if (res.ok && result.success) {
-        addToast("Transaction marked as REJECTED (Cancelled)", 'success')
+      const result = await parseJsonResponse<ApiResponse<unknown>>(res)
+      if (res.ok && result?.success) {
+        addToast('Transaction cancelled', 'success')
         fetchHistory(historyPage)
+        fetchWallet()
       } else {
-        addToast(result.message || "Cancellation failed", 'error')
+        addToast(result?.message || 'Cancel failed', 'error')
       }
-    } catch (err: any) {
-      addToast("Action failed: " + err.message, 'error')
-    }
+    } catch { /* handled */ }
   }
 
-  // File Download Handler
   const handleDownload = async (format: 'csv' | 'excel' | 'pdf') => {
     const filename = `payment_history_${Date.now()}.${format === 'excel' ? 'xlsx' : format}`
-    const url = `/api/payment/export/${format}`
-    addToast(`Generating and downloading ${format.toUpperCase()} export...`, 'info')
-
     try {
-      const res = await fetchWithAuth(url, { method: 'GET' })
+      const res = await fetchWithAuth(`/api/payment/export/${format}`)
       if (!res.ok) throw new Error(`Server returned ${res.status}`)
-
       const blob = await res.blob()
       const blobUrl = URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -501,308 +568,392 @@ function App() {
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(blobUrl)
-      addToast(`${format.toUpperCase()} downloaded successfully!`, 'success')
-    } catch (err: any) {
-      addToast(`Export failed: ${err.message}`, 'error')
+      addToast(`${format.toUpperCase()} downloaded!`, 'success')
+    } catch (err: unknown) {
+      addToast('Export failed', 'error')
     }
   }
 
-  // LOGIN SCREEN
+  const ToastContainer = () => (
+    <div className="toast-container">
+      {toasts.map(toast => (
+        <div key={toast.id} className={`toast ${toast.type}`}>
+          {toast.type === 'success' && <CheckCircle2 size={16} />}
+          {toast.type === 'error' && <AlertTriangle size={16} />}
+          {toast.type === 'info' && <Info size={16} />}
+          <span>{toast.message}</span>
+        </div>
+      ))}
+    </div>
+  )
+
   if (!token) {
     return (
       <div className="auth-container">
+        <div className="auth-bg-orbs" />
         <div className="glass-panel auth-card">
           <div className="auth-header">
-            <h1 className="brand-title">
-              <Radio className="input-icon" style={{ position: 'static', color: '#a855f7' }} />
-              OfflineUPI
-            </h1>
-            <p className="brand-subtitle">Secure encrypted offline peer-to-peer payments</p>
+            <div className="auth-logo">
+              <Zap size={36} />
+            </div>
+            <h1 className="brand-title">OfflineUPI</h1>
+            <p className="brand-subtitle">Pay anyone, anywhere — even without internet</p>
           </div>
-
           <form onSubmit={handleAuth}>
             <div className="form-group">
               <label className="form-label">Username</label>
               <div className="input-container">
                 <User size={16} className="input-icon" />
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Enter your username"
-                  value={authUsername}
-                  onChange={(e) => setAuthUsername(e.target.value)}
-                  autoComplete="username"
-                  required
-                />
+                <input type="text" className="form-input" placeholder="Enter username"
+                  value={authUsername} onChange={e => setAuthUsername(e.target.value)}
+                  autoComplete="username" required />
               </div>
             </div>
-
             <div className="form-group">
               <label className="form-label">Password</label>
               <div className="input-container">
                 <Lock size={16} className="input-icon" />
-                <input
-                  type="password"
-                  className="form-input"
-                  placeholder="••••••••"
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  autoComplete="current-password"
-                  required
-                />
+                <input type="password" className="form-input" placeholder="••••••••"
+                  value={authPassword} onChange={e => setAuthPassword(e.target.value)}
+                  autoComplete="current-password" required />
               </div>
             </div>
-
             {!isLogin && (
-              <p style={{ fontSize: 13, color: 'var(--neutral-400)', marginBottom: 16 }}>
-                New accounts are registered as standard users.
-              </p>
+              <p className="auth-hint">New accounts start with ₹10,000 wallet balance</p>
             )}
-
             <button type="submit" className="btn-primary">
-              {isLogin ? "Authenticate" : "Register Account"}
+              {isLogin ? 'Sign In' : 'Create Account'}
             </button>
           </form>
-
           <div className="auth-footer">
             {isLogin ? (
-              <>
-                Need an account?
-                <button className="auth-link" onClick={() => setIsLogin(false)}>
-                  Sign Up
-                </button>
-              </>
+              <>New here? <button className="auth-link" onClick={() => setIsLogin(false)}>Sign Up</button></>
             ) : (
-              <>
-                Have an account?
-                <button className="auth-link" onClick={() => setIsLogin(true)}>
-                  Sign In
-                </button>
-              </>
+              <>Have an account? <button className="auth-link" onClick={() => setIsLogin(true)}>Sign In</button></>
             )}
           </div>
+          <div className="demo-credentials">
+            <p>Demo: <strong>user</strong> / <strong>password</strong> &nbsp;|&nbsp; <strong>admin</strong> / <strong>password</strong></p>
+          </div>
         </div>
-
-        {/* Toast Alerts */}
-        <div className="toast-container">
-          {toasts.map((toast) => (
-            <div key={toast.id} className={`toast ${toast.type}`}>
-              {toast.type === 'success' && <CheckCircle2 size={16} />}
-              {toast.type === 'error' && <AlertTriangle size={16} />}
-              {toast.type === 'info' && <Info size={16} />}
-              <span>{toast.message}</span>
-            </div>
-          ))}
-        </div>
+        <ToastContainer />
       </div>
     )
   }
 
-  // MAIN DASHBOARD SCREEN
+  const tabs: { id: Tab; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
+    { id: 'home', label: 'Home', icon: <Home size={15} /> },
+    { id: 'send', label: 'Pay', icon: <Send size={15} /> },
+    { id: 'split', label: 'Split', icon: <Users size={15} /> },
+    { id: 'bills', label: 'Bills', icon: <Receipt size={15} /> },
+    { id: 'history', label: 'History', icon: <History size={15} /> },
+    { id: 'admin', label: 'Admin', icon: <BarChart3 size={15} />, adminOnly: true },
+  ]
+
   return (
     <div className="dashboard-layout">
-      {/* Top Navbar */}
       <header className="top-navbar">
-        <h1 className="brand-title" style={{ margin: 0, cursor: 'pointer' }} onClick={() => setCurrentTab('send')}>
-          <Radio size={24} style={{ color: '#a855f7' }} />
+        <h1 className="brand-title navbar-brand" onClick={() => setCurrentTab('home')}>
+          <Zap size={22} style={{ color: '#a855f7' }} />
           OfflineUPI
         </h1>
-
         <div className="nav-user-area">
+          {wallet && (
+            <div className="nav-balance">
+              <IndianRupee size={14} />
+              <span>{formatCurrency(wallet.balance)}</span>
+            </div>
+          )}
           <div className="user-badge">
-            <span className="avatar">{username ? username.substring(0, 2).toUpperCase() : 'U'}</span>
-            <span style={{ fontWeight: 600, fontSize: 14 }}>{username}</span>
-            <span className={`role-tag ${isAdmin ? 'admin' : 'user'}`}>
-              {isAdmin ? 'Admin' : 'User'}
-            </span>
+            <span className="avatar">{username?.substring(0, 2).toUpperCase()}</span>
+            <span className="user-name">{username}</span>
+            <span className={`role-tag ${isAdmin ? 'admin' : 'user'}`}>{isAdmin ? 'Admin' : 'User'}</span>
           </div>
-
-          <button onClick={handleLogout} className="btn-secondary" style={{ padding: '8px 14px' }}>
-            <LogOut size={14} />
-            Exit
+          <button onClick={handleLogout} className="btn-secondary btn-logout">
+            <LogOut size={14} /> Exit
           </button>
         </div>
       </header>
 
-      {/* Main Container */}
       <main className="dashboard-content">
-        {/* Navigation Tabs */}
         <nav className="tab-navigation">
-          <button
-            className={`tab-btn ${currentTab === 'send' ? 'active' : ''}`}
-            onClick={() => setCurrentTab('send')}
-          >
-            <Send size={15} />
-            Send Offline
-          </button>
-          <button
-            className={`tab-btn ${currentTab === 'history' ? 'active' : ''}`}
-            onClick={() => setCurrentTab('history')}
-          >
-            <History size={15} />
-            My History
-          </button>
-          {isAdmin && (
-            <button
-              className={`tab-btn ${currentTab === 'admin' ? 'active' : ''}`}
-              onClick={() => setCurrentTab('admin')}
-            >
-              <BarChart3 size={15} />
-              Admin Console
+          {tabs.filter(t => !t.adminOnly || isAdmin).map(tab => (
+            <button key={tab.id} className={`tab-btn ${currentTab === tab.id ? 'active' : ''}`}
+              onClick={() => setCurrentTab(tab.id)}>
+              {tab.icon} {tab.label}
             </button>
-          )}
+          ))}
         </nav>
 
-        {/* Tab 1: Send Offline Payment */}
+        {/* HOME TAB */}
+        {currentTab === 'home' && (
+          <div className="home-layout">
+            <div className="wallet-card">
+              <div className="wallet-card-bg" />
+              <div className="wallet-card-content">
+                <div className="wallet-card-header">
+                  <Wallet size={20} />
+                  <span>My Wallet</span>
+                </div>
+                <div className="wallet-balance">{wallet ? formatCurrency(wallet.balance) : '...'}</div>
+                <div className="wallet-upi-id">{wallet?.upiId || ''}</div>
+                <div className="wallet-stats-row">
+                  <div className="wallet-stat">
+                    <span className="wallet-stat-label">Spent this month</span>
+                    <span className="wallet-stat-value spent">{formatCurrency(wallet?.monthlySpent ?? 0)}</span>
+                  </div>
+                  <div className="wallet-stat">
+                    <span className="wallet-stat-label">Received</span>
+                    <span className="wallet-stat-value received">{formatCurrency(wallet?.monthlyReceived ?? 0)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="quick-actions">
+              <button className="quick-action-btn" onClick={() => setCurrentTab('send')}>
+                <Send size={22} /><span>Pay</span>
+              </button>
+              <button className="quick-action-btn" onClick={() => setCurrentTab('split')}>
+                <Users size={22} /><span>Split</span>
+              </button>
+              <button className="quick-action-btn" onClick={() => setCurrentTab('bills')}>
+                <Receipt size={22} /><span>Bills</span>
+              </button>
+              <button className="quick-action-btn" onClick={() => setCurrentTab('history')}>
+                <History size={22} /><span>History</span>
+              </button>
+            </div>
+
+            {monthlySummary && (
+              <div className="glass-panel home-panel">
+                <h2 className="panel-title"><Calendar size={20} style={{ color: 'var(--accent-cyan)' }} /> {monthlySummary.month} Summary</h2>
+                <div className="summary-grid">
+                  <div className="summary-item">
+                    <span className="summary-label">Transactions</span>
+                    <span className="summary-value">{monthlySummary.transactionCount}</span>
+                  </div>
+                  <div className="summary-item">
+                    <span className="summary-label">Total Spent</span>
+                    <span className="summary-value spent">{formatCurrency(monthlySummary.totalSpent)}</span>
+                  </div>
+                  <div className="summary-item">
+                    <span className="summary-label">Total Received</span>
+                    <span className="summary-value received">{formatCurrency(monthlySummary.totalReceived)}</span>
+                  </div>
+                </div>
+                {Object.keys(monthlySummary.categoryBreakdown).length > 0 && (
+                  <div className="category-breakdown">
+                    <h3 className="section-subtitle">Spending by Category</h3>
+                    {Object.entries(monthlySummary.categoryBreakdown).map(([cat, amt]) => (
+                      <div key={cat} className="category-bar-row">
+                        <span className="category-name">{cat}</span>
+                        <div className="category-bar-track">
+                          <div className="category-bar-fill" style={{
+                            width: `${Math.min(100, (amt / (monthlySummary.totalSpent || 1)) * 100)}%`
+                          }} />
+                        </div>
+                        <span className="category-amount">{formatCurrency(amt)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SEND TAB */}
         {currentTab === 'send' && (
           <div className="send-layout">
             <div className="glass-panel form-panel">
-              <h2 className="panel-title">
-                <Send style={{ color: 'var(--primary)' }} />
-                Offline UPI Payment Form
-              </h2>
+              <h2 className="panel-title"><Send style={{ color: 'var(--primary)' }} /> Send Money</h2>
               <form onSubmit={handleSendPayment}>
                 <div className="form-group">
-                  <label className="form-label">Sender Account</label>
+                  <label className="form-label">From</label>
                   <div className="input-container">
                     <User size={16} className="input-icon" />
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={username || ''}
-                      disabled
-                      style={{ opacity: 0.7 }}
-                    />
+                    <input type="text" className="form-input" value={username || ''} disabled />
                   </div>
                 </div>
-
                 <div className="form-group">
-                  <label className="form-label">Receiver Username</label>
+                  <label className="form-label">To</label>
                   <div className="input-container">
                     <User size={16} className="input-icon" />
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="e.g. Bob"
-                      value={receiver}
-                      onChange={(e) => setReceiver(e.target.value)}
-                      required
-                    />
+                    <select className="form-input form-select" value={receiver}
+                      onChange={e => setReceiver(e.target.value)} required>
+                      <option value="">Select recipient</option>
+                      {allUsers.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
                   </div>
                 </div>
-
                 <div className="form-group">
-                  <label className="form-label">Payment Amount</label>
+                  <label className="form-label">Amount (₹)</label>
                   <div className="input-container">
-                    <DollarSign size={16} className="input-icon" />
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="0.00"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      required
-                    />
+                    <IndianRupee size={16} className="input-icon" />
+                    <input type="number" className="form-input" placeholder="0.00" min="1" step="0.01"
+                      value={amount} onChange={e => setAmount(e.target.value)} required />
                   </div>
                 </div>
-
+                <div className="form-group">
+                  <label className="form-label">Category</label>
+                  <select className="form-input form-select" value={category} onChange={e => setCategory(e.target.value)}>
+                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Note (optional)</label>
+                  <input type="text" className="form-input" style={{ paddingLeft: 16 }}
+                    placeholder="What's this for?" value={note} onChange={e => setNote(e.target.value)} />
+                </div>
                 <button type="submit" className="btn-primary" disabled={sendingPayment}>
-                  {sendingPayment ? (
-                    <>
-                      <RefreshCw size={16} className="animate-spin" />
-                      Encrypting & Broadcasting...
-                    </>
-                  ) : (
-                    "Authorize Offline Transfer"
-                  )}
+                  {sendingPayment ? <><RefreshCw size={16} className="animate-spin" /> Processing...</> : 'Pay Now'}
                 </button>
               </form>
             </div>
-
-            {/* AES Encryption Visualizer Panel */}
             <div className="glass-panel encryption-panel">
-              <h2 className="panel-title">
-                <Shield style={{ color: 'var(--accent-cyan)' }} />
-                Security Visualizer
-              </h2>
-              <p style={{ fontSize: 13, color: 'var(--neutral-400)', marginBottom: 14 }}>
-                Offline transaction payloads are AES encrypted on the local device, simulating mesh network hops before persistence.
-              </p>
-
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                <span className="form-label">Transaction Payload State</span>
-                <div className={`encrypted-payload-area custom-scrollbar ${sendingPayment ? 'encrypting' : ''}`}>
-                  {lastPaymentResult ? (
-                    <div style={{ color: lastPaymentResult.success ? '#10b981' : '#cbd5e1', whiteSpace: 'pre-wrap' }}>
-                      {lastPaymentResult.payload}
-                      {lastPaymentResult.success && (
-                        <div style={{ marginTop: 12, color: 'var(--neutral-300)', fontSize: 12 }}>
-                          <hr style={{ borderColor: 'rgba(255,255,255,0.08)', margin: '8px 0' }} />
-                          <p><strong>Transaction ID:</strong> {lastPaymentResult.transactionId}</p>
-                          <p><strong>Hops Counter:</strong> {lastPaymentResult.hopCount}</p>
-                          <p><strong>Database Status:</strong> {lastPaymentResult.status}</p>
-                          <p style={{ marginTop: 6, color: '#f59e0b', fontSize: 11 }}>
-                            ℹ️ Requires administrator sync when network connectivity is restored.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{ color: 'var(--neutral-600)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 10 }}>
-                      <Radio size={36} className="animate-pulse" />
-                      <span>Awaiting offline transaction broadcast...</span>
-                    </div>
-                  )}
-                </div>
+              <h2 className="panel-title"><Shield style={{ color: 'var(--accent-cyan)' }} /> Security Status</h2>
+              <p className="panel-desc">Transactions are AES-encrypted and stored offline until network sync.</p>
+              <div className={`encrypted-payload-area custom-scrollbar ${sendingPayment ? 'encrypting' : ''}`}>
+                {lastPaymentResult ? (
+                  <div className={lastPaymentResult.success ? 'payload-success' : 'payload-info'}>
+                    {lastPaymentResult.payload}
+                    {lastPaymentResult.success && (
+                      <div className="payload-details">
+                        <p><strong>ID:</strong> {lastPaymentResult.transactionId}</p>
+                        <p><strong>Hops:</strong> {lastPaymentResult.hopCount}</p>
+                        <p><strong>Status:</strong> {lastPaymentResult.status}</p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="payload-empty">
+                    <Radio size={36} className="animate-pulse" />
+                    <span>Ready for offline payment</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         )}
 
-        {/* Tab 2: Transaction History */}
-        {currentTab === 'history' && (
-          <div className="glass-panel" style={{ padding: '32px' }}>
-            <div style={{ display: 'flex', justifyContent: 'between', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
-              <h2 className="panel-title" style={{ margin: 0 }}>
-                <History style={{ color: 'var(--primary)' }} />
-                Transaction History Logs
-              </h2>
+        {/* SPLIT TAB */}
+        {currentTab === 'split' && (
+          <div className="glass-panel form-panel split-panel">
+            <h2 className="panel-title"><Users style={{ color: 'var(--accent-purple)' }} /> Split Expense</h2>
+            <p className="panel-desc">Split a bill equally among friends. Each person&apos;s share is deducted from their wallet.</p>
+            <form onSubmit={handleSplit}>
+              <div className="form-group">
+                <label className="form-label">Total Amount (₹)</label>
+                <div className="input-container">
+                  <IndianRupee size={16} className="input-icon" />
+                  <input type="number" className="form-input" placeholder="1200" min="1" step="0.01"
+                    value={splitAmount} onChange={e => setSplitAmount(e.target.value)} required />
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Participants (comma-separated usernames)</label>
+                <input type="text" className="form-input" style={{ paddingLeft: 16 }}
+                  placeholder="e.g. bob, charlie" value={splitParticipants}
+                  onChange={e => setSplitParticipants(e.target.value)} required />
+                <p className="field-hint">Available: {allUsers.join(', ') || 'loading...'}</p>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Description</label>
+                <input type="text" className="form-input" style={{ paddingLeft: 16 }}
+                  placeholder="Dinner at restaurant" value={splitDescription}
+                  onChange={e => setSplitDescription(e.target.value)} />
+              </div>
+              {splitAmount && splitParticipants && (
+                <div className="split-preview">
+                  Each person pays: <strong>{formatCurrency(parseFloat(splitAmount) / (splitParticipants.split(',').filter(Boolean).length + 1))}</strong>
+                </div>
+              )}
+              <button type="submit" className="btn-primary" disabled={splitting}>
+                {splitting ? <><RefreshCw size={16} className="animate-spin" /> Splitting...</> : 'Split Expense'}
+              </button>
+            </form>
+          </div>
+        )}
 
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn-secondary" onClick={() => handleDownload('csv')}>
-                  <Download size={14} />
-                  CSV
-                </button>
-                <button className="btn-secondary" onClick={() => handleDownload('excel')}>
-                  <Download size={14} />
-                  Excel
-                </button>
-                <button className="btn-secondary" onClick={() => handleDownload('pdf')}>
-                  <Download size={14} />
-                  PDF
-                </button>
+        {/* BILLS TAB */}
+        {currentTab === 'bills' && (
+          <div className="bills-layout">
+            <div className="glass-panel form-panel">
+              <h2 className="panel-title"><Plus style={{ color: 'var(--success)' }} /> Add Bill Reminder</h2>
+              <form onSubmit={handleAddBill}>
+                <div className="form-group">
+                  <label className="form-label">Bill Title</label>
+                  <input type="text" className="form-input" style={{ paddingLeft: 16 }}
+                    placeholder="Electricity Bill" value={billTitle} onChange={e => setBillTitle(e.target.value)} required />
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Amount (₹)</label>
+                    <input type="number" className="form-input" style={{ paddingLeft: 16 }}
+                      placeholder="1500" min="1" value={billAmount} onChange={e => setBillAmount(e.target.value)} required />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Due Day</label>
+                    <input type="number" className="form-input" style={{ paddingLeft: 16 }}
+                      min="1" max="28" value={billDueDay} onChange={e => setBillDueDay(e.target.value)} />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Category</label>
+                  <select className="form-input form-select" value={billCategory} onChange={e => setBillCategory(e.target.value)}>
+                    {CATEGORIES.filter(c => c !== 'SPLIT').map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <button type="submit" className="btn-primary">Add Reminder</button>
+              </form>
+            </div>
+            <div className="glass-panel bills-list-panel">
+              <h2 className="panel-title"><Receipt style={{ color: 'var(--pending)' }} /> Monthly Bills</h2>
+              {bills.length === 0 ? (
+                <div className="empty-state"><Info size={28} /><span>No bill reminders yet</span></div>
+              ) : (
+                <div className="bills-list">
+                  {bills.map(bill => (
+                    <div key={bill.id} className="bill-card">
+                      <div className="bill-info">
+                        <span className="bill-title">{bill.title}</span>
+                        <span className="bill-meta">{bill.category} · Due day {bill.dueDay}</span>
+                      </div>
+                      <div className="bill-right">
+                        <span className="bill-amount">{formatCurrency(bill.amount)}</span>
+                        <button className="btn-icon-danger" onClick={() => handleDeleteBill(bill.id)}>
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* HISTORY TAB */}
+        {currentTab === 'history' && (
+          <div className="glass-panel history-panel">
+            <div className="history-header">
+              <h2 className="panel-title"><History style={{ color: 'var(--primary)' }} /> Transaction History</h2>
+              <div className="export-btns">
+                {(['csv', 'excel', 'pdf'] as const).map(fmt => (
+                  <button key={fmt} className="btn-secondary" onClick={() => handleDownload(fmt)}>
+                    <Download size={14} /> {fmt.toUpperCase()}
+                  </button>
+                ))}
               </div>
             </div>
-
-            {/* Filter controls */}
             <div className="filter-bar">
-              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                <Search size={16} className="input-icon" style={{ left: 10 }} />
-                <input
-                  type="text"
-                  className="filter-input"
-                  style={{ paddingLeft: 34, width: '260px' }}
-                  placeholder="Search ID, sender, receiver..."
-                  value={filterSearch}
-                  onChange={(e) => setFilterSearch(e.target.value)}
-                />
+              <div className="search-input-wrap">
+                <Search size={16} className="input-icon" />
+                <input type="text" className="filter-input" placeholder="Search..."
+                  value={filterSearch} onChange={e => setFilterSearch(e.target.value)} />
               </div>
-
-              <select
-                className="filter-input"
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-              >
+              <select className="filter-input" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
                 <option value="">All Statuses</option>
                 <option value="PENDING">Pending</option>
                 <option value="WAITING_FOR_SYNC">Waiting for Sync</option>
@@ -810,78 +961,39 @@ function App() {
                 <option value="FAILED">Failed</option>
                 <option value="REJECTED">Rejected</option>
               </select>
-
-              <button className="btn-primary" style={{ width: 'auto', padding: '8px 18px', fontSize: 14 }} onClick={() => fetchHistory(0)}>
-                Apply Filters
-              </button>
+              <button className="btn-primary btn-filter" onClick={() => fetchHistory(0)}>Apply</button>
             </div>
-
-            {/* Table */}
             <div className="table-wrapper">
               {loadingHistory ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 0', gap: 10 }}>
-                  <RefreshCw className="animate-spin" size={24} style={{ color: 'var(--primary)' }} />
-                  <span style={{ color: 'var(--neutral-400)' }}>Loading history logs...</span>
-                </div>
+                <div className="empty-state"><RefreshCw className="animate-spin" size={24} /><span>Loading...</span></div>
               ) : history.length === 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 0', gap: 10 }}>
-                  <Info size={28} style={{ color: 'var(--neutral-400)' }} />
-                  <span style={{ color: 'var(--neutral-400)' }}>No transaction logs match search filters.</span>
-                </div>
+                <div className="empty-state"><Info size={28} /><span>No transactions found</span></div>
               ) : (
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>TX UUID</th>
-                      <th>Sender</th>
-                      <th>Receiver</th>
-                      <th>Amount</th>
-                      <th>Status</th>
-                      <th>Hops</th>
-                      <th>Date</th>
-                      <th>Actions</th>
+                      <th>ID</th><th>From</th><th>To</th><th>Amount</th><th>Type</th><th>Status</th><th>Date</th><th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {history.map((tx) => (
+                    {history.map(tx => (
                       <tr key={tx.id}>
-                        <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>
-                          {tx.transactionId.substring(0, 8)}...
-                        </td>
+                        <td className="mono">{tx.transactionId.substring(0, 8)}...</td>
                         <td>{tx.sender}</td>
                         <td>{tx.receiver}</td>
-                        <td style={{ fontWeight: 600 }}>${tx.amount.toFixed(2)}</td>
-                        <td>
-                          <span className={`badge ${tx.status.toLowerCase()}`}>
-                            {tx.status === 'WAITING_FOR_SYNC' ? 'waiting' : tx.status.toLowerCase()}
-                          </span>
-                        </td>
-                        <td>{tx.hopCount}</td>
-                        <td style={{ fontSize: 13, color: 'var(--neutral-400)' }}>
-                          {new Date(tx.createdAt).toLocaleString()}
-                        </td>
+                        <td className="amount-cell">{formatCurrency(tx.amount)}</td>
+                        <td><span className="type-tag">{tx.transactionType || 'TRANSFER'}</span></td>
+                        <td><span className={`badge ${tx.status === 'WAITING_FOR_SYNC' ? 'waiting_for_sync' : tx.status.toLowerCase()}`}>
+                          {tx.status === 'WAITING_FOR_SYNC' ? 'SYNC' : tx.status}
+                        </span></td>
+                        <td className="date-cell">{new Date(tx.createdAt).toLocaleString()}</td>
                         <td>
                           <div className="row-actions">
                             {tx.status === 'FAILED' && (
-                              <button
-                                className="btn-secondary"
-                                style={{ padding: '4px 10px', fontSize: 12, borderColor: 'var(--success)', color: 'var(--success)' }}
-                                onClick={() => handleRetry(tx.id)}
-                              >
-                                Retry
-                              </button>
+                              <button className="btn-action success" onClick={() => handleRetry(tx.id)}>Retry</button>
                             )}
                             {(tx.status === 'PENDING' || tx.status === 'WAITING_FOR_SYNC') && (
-                              <button
-                                className="btn-secondary"
-                                style={{ padding: '4px 10px', fontSize: 12, borderColor: 'var(--danger)', color: 'var(--danger)' }}
-                                onClick={() => handleCancel(tx.id)}
-                              >
-                                Cancel
-                              </button>
-                            )}
-                            {!['FAILED', 'PENDING', 'WAITING_FOR_SYNC'].includes(tx.status) && (
-                              <span style={{ fontSize: 12, color: 'var(--neutral-600)' }}>None</span>
+                              <button className="btn-action danger" onClick={() => handleCancel(tx.id)}>Cancel</button>
                             )}
                           </div>
                         </td>
@@ -891,26 +1003,14 @@ function App() {
                 </table>
               )}
             </div>
-
-            {/* Pagination */}
             {historyTotalPages > 1 && (
               <div className="pagination-controls">
-                <span className="pagination-info">
-                  Showing page {historyPage + 1} of {historyTotalPages} ({historyTotalElements} total records)
-                </span>
+                <span className="pagination-info">Page {historyPage + 1} of {historyTotalPages} ({historyTotalElements} records)</span>
                 <div className="pagination-btn-group">
-                  <button
-                    className="btn-secondary"
-                    disabled={historyPage === 0}
-                    onClick={() => fetchHistory(historyPage - 1)}
-                  >
+                  <button className="btn-secondary" disabled={historyPage === 0} onClick={() => fetchHistory(historyPage - 1)}>
                     <ChevronLeft size={16} />
                   </button>
-                  <button
-                    className="btn-secondary"
-                    disabled={historyPage >= historyTotalPages - 1}
-                    onClick={() => fetchHistory(historyPage + 1)}
-                  >
+                  <button className="btn-secondary" disabled={historyPage >= historyTotalPages - 1} onClick={() => fetchHistory(historyPage + 1)}>
                     <ChevronRight size={16} />
                   </button>
                 </div>
@@ -919,127 +1019,66 @@ function App() {
           </div>
         )}
 
-        {/* Tab 3: Admin Console */}
+        {/* ADMIN TAB */}
         {currentTab === 'admin' && isAdmin && (
           <div>
-            {/* Sync Console Header */}
             <div className="glass-panel sync-console-panel">
               <div>
-                <h2 className="panel-title" style={{ margin: 0, fontSize: 20 }}>
-                  <Radio className="animate-pulse" style={{ color: 'var(--primary)' }} />
-                  Restored Connectivity Sync console
-                </h2>
-                <p style={{ fontSize: 13, color: 'var(--neutral-400)', marginTop: 4 }}>
-                  Trigger simulation to batch process, decrypt and settle all pending offline transactions on the bank ledger.
-                </p>
+                <h2 className="panel-title"><Radio className="animate-pulse" style={{ color: 'var(--primary)' }} /> Sync Console</h2>
+                <p className="panel-desc">Process all pending offline transactions when connectivity is restored.</p>
               </div>
-
-              <button
-                onClick={handleSync}
-                disabled={syncing}
-                className="btn-primary pulse-sync-btn"
-                style={{ width: 'auto', padding: '12px 24px' }}
-              >
-                {syncing ? (
-                  <>
-                    <RefreshCw className="animate-spin" size={16} />
-                    Syncing Ledger...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw size={16} />
-                    Synchronize Batch
-                  </>
-                )}
+              <button onClick={handleSync} disabled={syncing} className="btn-primary pulse-sync-btn btn-sync">
+                {syncing ? <><RefreshCw className="animate-spin" size={16} /> Syncing...</> : <><RefreshCw size={16} /> Sync All</>}
               </button>
             </div>
-
-            {/* Stats Metrics Cards */}
             {loadingStats ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 0', gap: 10 }}>
-                <RefreshCw className="animate-spin" size={24} style={{ color: 'var(--primary)' }} />
-                <span style={{ color: 'var(--neutral-400)' }}>Syncing dashboard metrics...</span>
-              </div>
+              <div className="empty-state"><RefreshCw className="animate-spin" size={24} /><span>Loading stats...</span></div>
             ) : stats ? (
-              <div className="metrics-grid">
-                <div className="glass-panel metric-card">
-                  <div className="metric-header">
-                    <span>Total Submissions</span>
-                    <History size={16} style={{ color: 'var(--primary)' }} />
+              <>
+                <div className="metrics-grid">
+                  {[
+                    { label: 'Total', value: stats.totalTransactions, icon: <History size={16} />, color: 'var(--primary)' },
+                    { label: 'Pending', value: stats.pendingCount, icon: <Radio size={16} />, color: 'var(--pending)' },
+                    { label: 'Synced', value: stats.syncedCount, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
+                    { label: 'Failed', value: stats.failedCount, icon: <XCircle size={16} />, color: 'var(--danger)' },
+                  ].map(m => (
+                    <div key={m.label} className="glass-panel metric-card">
+                      <div className="metric-header"><span>{m.label}</span>{m.icon}</div>
+                      <div className="metric-value">{m.value}</div>
+                    </div>
+                  ))}
+                  <div className="glass-panel metric-card span-2">
+                    <div className="metric-header"><span>Total Settled</span><IndianRupee size={16} /></div>
+                    <div className="metric-value">{formatCurrency(stats.totalAmount)}</div>
                   </div>
-                  <div className="metric-value">{stats.totalTransactions}</div>
-                  <div className="metric-footer">Total historical volume</div>
+                  <div className="glass-panel metric-card">
+                    <div className="metric-header"><span>Success Rate</span><Shield size={16} /></div>
+                    <div className="metric-value">{stats.successRate.toFixed(1)}%</div>
+                    <div className="progress-bar"><div className="progress-fill" style={{ width: `${stats.successRate}%` }} /></div>
+                  </div>
                 </div>
-
-                <div className="glass-panel metric-card">
-                  <div className="metric-header">
-                    <span>Pending Local</span>
-                    <Radio size={16} style={{ color: 'var(--pending)' }} />
-                  </div>
-                  <div className="metric-value">{stats.pendingCount}</div>
-                  <div className="metric-footer">Awaiting sync block</div>
-                </div>
-
-                <div className="glass-panel metric-card">
-                  <div className="metric-header">
-                    <span>Settled / Synced</span>
-                    <CheckCircle2 size={16} style={{ color: 'var(--success)' }} />
-                  </div>
-                  <div className="metric-value">{stats.syncedCount}</div>
-                  <div className="metric-footer">Verified on banking ledger</div>
-                </div>
-
-                <div className="glass-panel metric-card">
-                  <div className="metric-header">
-                    <span>Failed / Timeout</span>
-                    <XCircle size={16} style={{ color: 'var(--danger)' }} />
-                  </div>
-                  <div className="metric-value">{stats.failedCount}</div>
-                  <div className="metric-footer">Network dropouts/timeouts</div>
-                </div>
-
-                <div className="glass-panel metric-card" style={{ gridColumn: 'span 2' }}>
-                  <div className="metric-header">
-                    <span>Financial Settlement</span>
-                    <DollarSign size={16} style={{ color: 'var(--accent-cyan)' }} />
-                  </div>
-                  <div className="metric-value">${stats.totalAmount.toFixed(2)}</div>
-                  <div className="metric-footer">Aggregate cleared amount</div>
-                </div>
-
-                <div className="glass-panel metric-card">
-                  <div className="metric-header">
-                    <span>Ledger Success Rate</span>
-                    <Shield size={16} style={{ color: 'var(--primary)' }} />
-                  </div>
-                  <div className="metric-value">{stats.successRate.toFixed(1)}%</div>
-                  <div className="metric-footer">
-                    <div style={{ width: '100%', background: 'rgba(255,255,255,0.05)', height: '4px', borderRadius: '2px', marginTop: 8 }}>
-                      <div style={{ width: `${stats.successRate}%`, background: 'var(--success)', height: '100%', borderRadius: '2px' }} />
+                {Object.keys(stats.dailyTransactions).length > 0 && (
+                  <div className="glass-panel chart-panel">
+                    <h2 className="panel-title"><BarChart3 size={20} /> Daily Activity</h2>
+                    <div className="bar-chart">
+                      {Object.entries(stats.dailyTransactions).slice(-7).map(([day, count]) => (
+                        <div key={day} className="bar-chart-item">
+                          <div className="bar-chart-bar" style={{ height: `${Math.max(8, count * 20)}px` }} />
+                          <span className="bar-chart-label">{day.slice(5)}</span>
+                          <span className="bar-chart-count">{count}</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </div>
-              </div>
+                )}
+              </>
             ) : (
-              <div style={{ textAlign: 'center', color: 'var(--neutral-400)', padding: 40 }}>
-                Failed to load stats
-              </div>
+              <div className="empty-state"><span>Failed to load stats</span></div>
             )}
           </div>
         )}
       </main>
-
-      {/* Global Toast Alerts */}
-      <div className="toast-container">
-        {toasts.map((toast) => (
-          <div key={toast.id} className={`toast ${toast.type}`}>
-            {toast.type === 'success' && <CheckCircle2 size={16} />}
-            {toast.type === 'error' && <AlertTriangle size={16} />}
-            {toast.type === 'info' && <Info size={16} />}
-            <span>{toast.message}</span>
-          </div>
-        ))}
-      </div>
+      <ToastContainer />
     </div>
   )
 }

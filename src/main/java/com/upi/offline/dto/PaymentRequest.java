@@ -8,11 +8,9 @@ import jakarta.validation.constraints.Positive;
 public class PaymentRequest {
 
     @Schema(
-            description = "Name of the sender",
-            example = "Alice",
-            requiredMode = Schema.RequiredMode.REQUIRED
+            description = "Name of the sender (ignored — logged-in user is used)",
+            example = "Alice"
     )
-    @NotBlank(message = "Sender cannot be empty")
     private String sender;
 
     @Schema(
@@ -31,6 +29,10 @@ public class PaymentRequest {
     @NotNull(message = "Amount cannot be null")
     @Positive(message = "Amount must be greater than zero")
     private Double amount;
+
+    private String category;
+
+    private String note;
 
     public String getSender() {
         return sender;
@@ -54,5 +56,21 @@ public class PaymentRequest {
 
     public void setAmount(Double amount) {
         this.amount = amount;
+    }
+
+    public String getCategory() {
+        return category;
+    }
+
+    public void setCategory(String category) {
+        this.category = category;
+    }
+
+    public String getNote() {
+        return note;
+    }
+
+    public void setNote(String note) {
+        this.note = note;
     }
 }

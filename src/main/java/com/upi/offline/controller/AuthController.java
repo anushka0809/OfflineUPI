@@ -8,6 +8,7 @@ import com.upi.offline.exception.TokenRefreshException;
 import com.upi.offline.repository.UserRepository;
 import com.upi.offline.security.JwtTokenProvider;
 import com.upi.offline.service.RefreshTokenService;
+import com.upi.offline.service.WalletService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -41,17 +42,20 @@ public class AuthController {
     private final PasswordEncoder encoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final RefreshTokenService refreshTokenService;
+    private final WalletService walletService;
 
     public AuthController(AuthenticationManager authenticationManager,
                           UserRepository userRepository,
                           PasswordEncoder encoder,
                           JwtTokenProvider jwtTokenProvider,
-                          RefreshTokenService refreshTokenService) {
+                          RefreshTokenService refreshTokenService,
+                          WalletService walletService) {
         this.authenticationManager = authenticationManager;
         this.userRepository = userRepository;
         this.encoder = encoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.refreshTokenService = refreshTokenService;
+        this.walletService = walletService;
     }
 
     @Operation(summary = "Login user", description = "Authenticates user credentials and returns a JWT access token and a refresh token.")
@@ -101,6 +105,7 @@ public class AuthController {
         roles.add(Role.ROLE_USER);
 
         user.setRoles(roles);
+        walletService.initializeNewUser(user);
         userRepository.save(user);
 
         log.info("User registered successfully: username={}, roles={}", user.getUsername(), roles);
@@ -128,5 +133,16 @@ public class AuthController {
 
         log.info("Access token successfully refreshed");
         return ResponseEntity.ok(ApiResponse.success("Token refreshed successfully", response));
+    }
+
+    @Operation(summary = "Logout user", description = "Invalidates the refresh token for the current session.")
+    @PostMapping("/logout")
+    public ResponseEntity<ApiResponse<String>> logout(@RequestBody(required = false) TokenRefreshRequest request) {
+        if (request != null && request.getRefreshToken() != null) {
+            refreshTokenService.findByToken(request.getRefreshToken())
+                    .ifPresent(token -> refreshTokenService.deleteByUserId(token.getUser().getId()));
+        }
+        SecurityContextHolder.clearContext();
+        return ResponseEntity.ok(ApiResponse.success("Logged out successfully", "OK"));
     }
 }

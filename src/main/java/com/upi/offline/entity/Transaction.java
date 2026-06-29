@@ -56,6 +56,21 @@ public class Transaction {
     @Column(name = "encrypted_payload", length = 5000)
     private String encryptedPayload;
 
+    @Column(name = "transaction_type", nullable = false)
+    private String transactionType = "TRANSFER";
+
+    @Column(length = 500)
+    private String note;
+
+    @Column(length = 50)
+    private String category;
+
+    @Column(name = "sender_debited", nullable = false)
+    private boolean senderDebited = false;
+
+    @Column(name = "receiver_credited", nullable = false)
+    private boolean receiverCredited = false;
+
     public Transaction() {
     }
 
@@ -169,6 +184,46 @@ public class Transaction {
 
     public void setEncryptedPayload(String encryptedPayload) {
         this.encryptedPayload = encryptedPayload;
+    }
+
+    public String getTransactionType() {
+        return transactionType;
+    }
+
+    public void setTransactionType(String transactionType) {
+        this.transactionType = transactionType;
+    }
+
+    public String getNote() {
+        return note;
+    }
+
+    public void setNote(String note) {
+        this.note = note;
+    }
+
+    public String getCategory() {
+        return category;
+    }
+
+    public void setCategory(String category) {
+        this.category = category;
+    }
+
+    public boolean isSenderDebited() {
+        return senderDebited;
+    }
+
+    public void setSenderDebited(boolean senderDebited) {
+        this.senderDebited = senderDebited;
+    }
+
+    public boolean isReceiverCredited() {
+        return receiverCredited;
+    }
+
+    public void setReceiverCredited(boolean receiverCredited) {
+        this.receiverCredited = receiverCredited;
     }
 
     // Compatibility method
