@@ -28,6 +28,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Caching;
 
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.PrintWriter;
@@ -51,6 +54,7 @@ public class PaymentService {
         this.aesEncryption = aesEncryption;
     }
 
+    @CacheEvict(value = "stats", allEntries = true)
     public Transaction save(Transaction transaction) {
         log.info("Attempting to save transaction with ID: {}", transaction.getTransactionId());
 
@@ -99,6 +103,7 @@ public class PaymentService {
         return transactions;
     }
 
+    @Cacheable(value = "transactions", key = "#id")
     public Transaction getTransaction(Long id) {
         log.info("Fetching transaction with database ID: {}", id);
         return repository.findById(id)
@@ -115,6 +120,10 @@ public class PaymentService {
     }
 
     @Transactional
+    @Caching(evict = {
+        @CacheEvict(value = "stats", allEntries = true),
+        @CacheEvict(value = "transactions", key = "#id")
+    })
     public Transaction retryPayment(Long id) {
         log.info("Request to retry failed transaction: {}", id);
         Transaction transaction = getTransaction(id);
@@ -136,6 +145,10 @@ public class PaymentService {
     }
 
     @Transactional
+    @Caching(evict = {
+        @CacheEvict(value = "stats", allEntries = true),
+        @CacheEvict(value = "transactions", key = "#id")
+    })
     public Transaction cancelPayment(Long id) {
         log.info("Request to cancel transaction: {}", id);
         Transaction transaction = getTransaction(id);
@@ -156,6 +169,7 @@ public class PaymentService {
     }
 
     @Transactional
+    @CacheEvict(value = {"stats", "transactions"}, allEntries = true)
     public List<Transaction> syncPendingTransactions() {
         log.info("Background synchronization batch execution started");
         List<Transaction> pending = repository.findByStatus("WAITING_FOR_SYNC");
@@ -245,6 +259,7 @@ public class PaymentService {
         return repository.findAll(spec, pageable);
     }
 
+    @Cacheable(value = "stats")
     public AdminStatsResponse getStats() {
         log.info("Generating dashboard statistics");
         AdminStatsResponse stats = new AdminStatsResponse();
