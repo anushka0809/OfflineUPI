@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: offlineupi-db
+    environment:
+      MYSQL_DATABASE: offlineupi
+      MYSQL_ROOT_PASSWORD: password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ppassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: offlineupi-app
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://db:3306/offlineupi?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=password
+      - SPRING_JPA_DATABASE_PLATFORM=org.hibernate.dialect.MySQLDialect
+      - OFFLINEUPI_APP_JWTSECRET=9a4f2c8d3b7a1e5c8f9d0a2b4c6e8f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e
+      - OFFLINEUPI_APP_AESSECRET=OfflineUPIAESKey
+    restart: always
+
+volumes:
+  mysql-data:

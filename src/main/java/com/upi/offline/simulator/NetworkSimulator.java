@@ -17,7 +17,7 @@ public class NetworkSimulator {
         transaction.setHopCount(hops);
 
         if (hops <= 2) {
-            transaction.setStatus("DELIVERED_OFFLINE");
+            transaction.setStatus("PENDING");
         } else {
             transaction.setStatus("WAITING_FOR_SYNC");
         }

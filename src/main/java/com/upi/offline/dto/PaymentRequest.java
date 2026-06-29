@@ -12,7 +12,7 @@ public class PaymentRequest {
             example = "Alice",
             requiredMode = Schema.RequiredMode.REQUIRED
     )
-    @NotBlank
+    @NotBlank(message = "Sender cannot be empty")
     private String sender;
 
     @Schema(
@@ -20,7 +20,7 @@ public class PaymentRequest {
             example = "Bob",
             requiredMode = Schema.RequiredMode.REQUIRED
     )
-    @NotBlank
+    @NotBlank(message = "Receiver cannot be empty")
     private String receiver;
 
     @Schema(
@@ -28,7 +28,8 @@ public class PaymentRequest {
             example = "500.0",
             requiredMode = Schema.RequiredMode.REQUIRED
     )
-    @NotNull
+    @NotNull(message = "Amount cannot be null")
+    @Positive(message = "Amount must be greater than zero")
     private Double amount;
 
     public String getSender() {

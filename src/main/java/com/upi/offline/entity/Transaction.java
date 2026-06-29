@@ -4,28 +4,56 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "transactions")
+@Table(name = "transactions", indexes = {
+    @Index(name = "idx_transaction_id", columnList = "transaction_id", unique = true),
+    @Index(name = "idx_status", columnList = "status"),
+    @Index(name = "idx_sender", columnList = "sender"),
+    @Index(name = "idx_receiver", columnList = "receiver"),
+    @Index(name = "idx_created_at", columnList = "created_at")
+})
 public class Transaction {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(name = "transaction_id", nullable = false, unique = true)
     private String transactionId;
 
+    @Column(nullable = false)
     private String sender;
 
+    @Column(nullable = false)
     private String receiver;
 
+    @Column(nullable = false)
     private Double amount;
 
-    private LocalDateTime timestamp;
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt = LocalDateTime.now();
 
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt = LocalDateTime.now();
+
+    @Column(name = "sync_time")
+    private LocalDateTime syncTime;
+
+    @Column(name = "failure_reason")
+    private String failureReason;
+
+    @Column(name = "device_id")
+    private String deviceId;
+
+    @Column(name = "retry_count", nullable = false)
+    private int retryCount = 0;
+
+    @Column(nullable = false)
     private String status;
 
-    private Integer hopCount;
+    @Column(name = "hop_count", nullable = false)
+    private Integer hopCount = 0;
 
-    @Column(length = 5000)
+    @Column(name = "encrypted_payload", length = 5000)
     private String encryptedPayload;
 
     public Transaction() {
@@ -71,12 +99,52 @@ public class Transaction {
         this.amount = amount;
     }
 
-    public LocalDateTime getTimestamp() {
-        return timestamp;
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
     }
 
-    public void setTimestamp(LocalDateTime timestamp) {
-        this.timestamp = timestamp;
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public LocalDateTime getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(LocalDateTime updatedAt) {
+        this.updatedAt = updatedAt;
+    }
+
+    public LocalDateTime getSyncTime() {
+        return syncTime;
+    }
+
+    public void setSyncTime(LocalDateTime syncTime) {
+        this.syncTime = syncTime;
+    }
+
+    public String getFailureReason() {
+        return failureReason;
+    }
+
+    public void setFailureReason(String failureReason) {
+        this.failureReason = failureReason;
+    }
+
+    public String getDeviceId() {
+        return deviceId;
+    }
+
+    public void setDeviceId(String deviceId) {
+        this.deviceId = deviceId;
+    }
+
+    public int getRetryCount() {
+        return retryCount;
+    }
+
+    public void setRetryCount(int retryCount) {
+        this.retryCount = retryCount;
     }
 
     public String getStatus() {
@@ -101,5 +169,14 @@ public class Transaction {
 
     public void setEncryptedPayload(String encryptedPayload) {
         this.encryptedPayload = encryptedPayload;
+    }
+
+    // Compatibility method
+    public LocalDateTime getTimestamp() {
+        return createdAt;
+    }
+
+    public void setTimestamp(LocalDateTime timestamp) {
+        this.createdAt = timestamp;
     }
 }
