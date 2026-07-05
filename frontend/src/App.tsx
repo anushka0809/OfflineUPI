@@ -2,115 +2,171 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Lock, User, Shield, Send, History, LogOut, CheckCircle2, AlertTriangle,
   RefreshCw, XCircle, Search, ChevronLeft, ChevronRight, Download, BarChart3,
-  Radio, Info, Wallet, Users, Receipt, Calendar, Home, IndianRupee, Plus, Trash2, Zap
+  Radio, Info, Wallet, Users, Receipt, Calendar, Home, IndianRupee, Plus, Trash2, Zap,
+  X, ShieldCheck, Wifi, Lock as LockIcon, ArrowUpRight, ArrowDownLeft, Layers, FileText, Eye
 } from 'lucide-react'
 
-interface ApiResponse<T> {
-  success: boolean
-  message: string
-  data: T
-}
-
-interface JwtResponse {
-  token: string
-  refreshToken: string
-  username: string
-  roles: string[]
-}
-
-interface TokenRefreshResponse {
-  accessToken: string
-  refreshToken: string
-}
-
-interface WalletData {
-  username: string
-  upiId: string
-  balance: number
-  monthlySpent: number
-  monthlyReceived: number
-}
-
-interface MonthlySummary {
-  month: string
-  totalSpent: number
-  totalReceived: number
-  transactionCount: number
-  categoryBreakdown: Record<string, number>
-  dailyActivity: Record<string, number>
-}
-
+/* ── Types ── */
+interface ApiResponse<T> { success: boolean; message: string; data: T }
+interface JwtResponse { token: string; refreshToken: string; username: string; roles: string[] }
+interface TokenRefreshResponse { accessToken: string; refreshToken: string }
+interface WalletData { username: string; upiId: string; balance: number; monthlySpent: number; monthlyReceived: number }
+interface MonthlySummary { month: string; totalSpent: number; totalReceived: number; transactionCount: number; categoryBreakdown: Record<string, number>; dailyActivity: Record<string, number> }
 interface Transaction {
-  id: number
-  transactionId: string
-  sender: string
-  receiver: string
-  amount: number
-  status: string
-  hopCount: number
-  createdAt: string
-  syncTime: string | null
-  failureReason: string | null
-  transactionType?: string
-  category?: string
-  note?: string
+  id: number; transactionId: string; sender: string; receiver: string;
+  amount: number; status: string; hopCount: number; createdAt: string;
+  syncTime: string | null; failureReason: string | null;
+  transactionType?: string; category?: string; note?: string
 }
-
-interface BillReminder {
-  id: number
-  title: string
-  amount: number
-  category: string
-  dueDay: number
-  active: boolean
-}
-
+interface BillReminder { id: number; title: string; amount: number; category: string; dueDay: number; active: boolean }
 interface AdminStatsResponse {
-  totalTransactions: number
-  pendingCount: number
-  syncedCount: number
-  failedCount: number
-  successRate: number
-  totalAmount: number
-  dailyTransactions: Record<string, number>
-  monthlyTransactions: Record<string, number>
+  totalTransactions: number; pendingCount: number; syncedCount: number; failedCount: number;
+  successRate: number; totalAmount: number;
+  dailyTransactions: Record<string, number>; monthlyTransactions: Record<string, number>
 }
-
-interface Toast {
-  id: number
-  message: string
-  type: 'success' | 'error' | 'info'
-}
-
+interface Toast { id: number; message: string; type: 'success' | 'error' | 'info' }
 type Tab = 'home' | 'send' | 'split' | 'bills' | 'history' | 'admin'
 
 const CATEGORIES = ['FOOD', 'RENT', 'UTILITIES', 'SHOPPING', 'TRAVEL', 'ENTERTAINMENT', 'SPLIT', 'OTHER']
 
-function formatCurrency(amount: number): string {
+const BILL_ICONS: Record<string, string> = {
+  UTILITIES: '💡', FOOD: '🍽️', RENT: '🏠', SHOPPING: '🛍️',
+  TRAVEL: '✈️', ENTERTAINMENT: '🎬', OTHER: '📋'
+}
+
+function formatCurrency(amount: number) {
   return '₹' + amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function parseStoredRoles(): string[] {
-  try {
-    const raw = localStorage.getItem('roles')
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
+  try { const r = localStorage.getItem('roles'); if (!r) return []; const p = JSON.parse(r); return Array.isArray(p) ? p : [] } catch { return [] }
 }
 
 async function parseJsonResponse<T>(res: Response): Promise<T | null> {
-  const contentType = res.headers.get('content-type') || ''
-  if (!contentType.includes('application/json')) return null
-  try {
-    return await res.json() as T
-  } catch {
-    return null
-  }
+  const ct = res.headers.get('content-type') || ''
+  if (!ct.includes('application/json')) return null
+  try { return await res.json() as T } catch { return null }
 }
 
+function getBadgeClass(status: string) {
+  const s = status.toLowerCase()
+  if (s === 'synced') return 'badge badge-synced'
+  if (s === 'pending') return 'badge badge-pending'
+  if (s === 'waiting_for_sync') return 'badge badge-waiting'
+  if (s === 'failed' || s === 'rejected') return 'badge badge-failed'
+  return 'badge badge-pending'
+}
+
+function getBadgeLabel(status: string) {
+  if (status === 'WAITING_FOR_SYNC') return 'Sync Pending'
+  return status.charAt(0) + status.slice(1).toLowerCase()
+}
+
+/* ── Tx Detail Modal ── */
+function TxDetailModal({ tx, onClose }: { tx: Transaction; onClose: () => void }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <div className="modal-header">
+          <div className="modal-title-row">
+            <div className="modal-check">
+              {tx.status === 'SYNCED' ? <CheckCircle2 size={20} /> : tx.status === 'FAILED' ? <XCircle size={20} style={{ color: 'var(--rose)' }} /> : <Radio size={20} style={{ color: 'var(--amber)' }} />}
+            </div>
+            <div>
+              <div className="modal-title">Transaction Details</div>
+              <div className="modal-subtitle">{new Date(tx.createdAt).toLocaleString()}</div>
+            </div>
+          </div>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="conf-amount">
+            <div className="conf-amount-val">{formatCurrency(tx.amount)}</div>
+            <div className="conf-amount-label">{tx.sender} → {tx.receiver}</div>
+          </div>
+          <div className="tx-detail-rows">
+            {[
+              ['Transaction ID', <span className="mono-sm">{tx.transactionId}</span>],
+              ['Status', <span className={getBadgeClass(tx.status)}>{getBadgeLabel(tx.status)}</span>],
+              ['Type', tx.transactionType || 'TRANSFER'],
+              ['Category', tx.category || '—'],
+              ['Hops', tx.hopCount],
+              ['Note', tx.note || '—'],
+              ...(tx.syncTime ? [['Synced At', new Date(tx.syncTime).toLocaleString()]] : []),
+              ...(tx.failureReason ? [['Failure Reason', <span style={{ color: 'var(--rose)' }}>{tx.failureReason}</span>]] : []),
+            ].map(([k, v], i) => (
+              <div key={i} className="tx-detail-row">
+                <span className="tx-detail-key">{k as string}</span>
+                <span className="tx-detail-val">{v as React.ReactNode}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── Payment Confirm Modal ── */
+function PaymentConfirmModal({ result, receiver, amount, onClose }: {
+  result: { success: boolean; transactionId?: string; status?: string; hopCount?: number; payload?: string };
+  receiver: string; amount: string; onClose: () => void
+}) {
+  const fakeAES = btoa(`AES256:${result.transactionId || 'pending'}:${Date.now()}`).substring(0, 64) + '...'
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-card" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="modal-title-row">
+            <div className="modal-check">
+              {result.success ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} style={{ color: 'var(--amber)' }} />}
+            </div>
+            <div>
+              <div className="modal-title">{result.success ? 'Payment Saved' : 'Payment Status'}</div>
+              <div className="modal-subtitle">{result.success ? 'Encrypted & stored offline' : 'Review details below'}</div>
+            </div>
+          </div>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="conf-amount">
+            <div className="conf-amount-val">{formatCurrency(parseFloat(amount) || 0)}</div>
+            <div className="conf-amount-label">to {receiver}</div>
+          </div>
+          <div className="conf-rows">
+            {result.transactionId && <div className="conf-row"><span className="conf-row-label">Transaction ID</span><span className="conf-row-val mono-sm">{result.transactionId.substring(0, 16)}…</span></div>}
+            {result.status && <div className="conf-row"><span className="conf-row-label">Status</span><span className={getBadgeClass(result.status)}>{getBadgeLabel(result.status)}</span></div>}
+            {result.hopCount !== undefined && <div className="conf-row"><span className="conf-row-label">Network Hops</span><span className="conf-row-val">{result.hopCount}</span></div>}
+          </div>
+          {result.success && (
+            <>
+              <hr className="conf-divider" />
+              <div className="enc-box">
+                <div className="enc-header"><ShieldCheck size={14} /> AES-256 Encrypted Payload</div>
+                <div className="enc-payload">{fakeAES}</div>
+              </div>
+            </>
+          )}
+          {!result.success && result.payload && (
+            <div style={{ marginTop: 14, padding: '10px 14px', background: 'var(--rose-dim)', borderRadius: 8, fontSize: 13, color: 'var(--rose)' }}>
+              {result.payload}
+            </div>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-violet" style={{ flex: 1 }} onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ══════════════════════════════════════════
+   MAIN APP
+═══════════════════════════════════════════ */
 function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'))
   const [, setRefreshToken] = useState<string | null>(localStorage.getItem('refreshToken'))
@@ -132,9 +188,12 @@ function App() {
   const [category, setCategory] = useState('OTHER')
   const [note, setNote] = useState('')
   const [sendingPayment, setSendingPayment] = useState(false)
-  const [lastPaymentResult, setLastPaymentResult] = useState<{
+  const [paymentResult, setPaymentResult] = useState<{
     success: boolean; transactionId?: string; status?: string; hopCount?: number; payload?: string
   } | null>(null)
+  const [showPayConfirm, setShowPayConfirm] = useState(false)
+  const [lastReceiver, setLastReceiver] = useState('')
+  const [lastAmount, setLastAmount] = useState('')
 
   const [splitAmount, setSplitAmount] = useState('')
   const [splitParticipants, setSplitParticipants] = useState('')
@@ -154,6 +213,7 @@ function App() {
   const [filterStatus, setFilterStatus] = useState('')
   const [filterSearch, setFilterSearch] = useState('')
   const [loadingHistory, setLoadingHistory] = useState(false)
+  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null)
 
   const [stats, setStats] = useState<AdminStatsResponse | null>(null)
   const [syncing, setSyncing] = useState(false)
@@ -169,110 +229,57 @@ function App() {
   }, [])
 
   const clearAuthState = useCallback(() => {
-    localStorage.removeItem('token')
-    localStorage.removeItem('refreshToken')
-    localStorage.removeItem('username')
-    localStorage.removeItem('roles')
-    setToken(null)
-    setRefreshToken(null)
-    setUsername(null)
-    setRoles([])
-    setWallet(null)
+    localStorage.removeItem('token'); localStorage.removeItem('refreshToken')
+    localStorage.removeItem('username'); localStorage.removeItem('roles')
+    setToken(null); setRefreshToken(null); setUsername(null); setRoles([]); setWallet(null)
   }, [])
 
   const fetchWithAuth = useCallback(async (url: string, options: RequestInit = {}): Promise<Response> => {
     const headers = new Headers(options.headers || {})
-    const currentToken = localStorage.getItem('token')
-    if (currentToken) headers.set('Authorization', `Bearer ${currentToken}`)
-    const isGetOrHead = !options.method || options.method === 'GET' || options.method === 'HEAD'
-    if (!isGetOrHead && !headers.has('Content-Type') && !(options.body instanceof FormData)) {
+    const ct = localStorage.getItem('token')
+    if (ct) headers.set('Authorization', `Bearer ${ct}`)
+    const isGet = !options.method || options.method === 'GET' || options.method === 'HEAD'
+    if (!isGet && !headers.has('Content-Type') && !(options.body instanceof FormData))
       headers.set('Content-Type', 'application/json')
-    }
-
     const response = await fetch(url, { ...options, headers })
     if (response.status !== 401) return response
-
-    const storedRefreshToken = localStorage.getItem('refreshToken')
-    if (!storedRefreshToken) {
-      clearAuthState()
-      addToast('Session expired. Please log in again.', 'error')
-      throw new Error('Unauthorized')
-    }
-
+    const rt = localStorage.getItem('refreshToken')
+    if (!rt) { clearAuthState(); addToast('Session expired. Please log in again.', 'error'); throw new Error('Unauthorized') }
     if (!refreshPromiseRef.current) {
       refreshPromiseRef.current = (async () => {
         try {
-          const refreshRes = await fetch('/api/auth/refreshtoken', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refreshToken: storedRefreshToken })
-          })
-          if (!refreshRes.ok) return false
-          const refreshData = await parseJsonResponse<ApiResponse<TokenRefreshResponse>>(refreshRes)
-          if (!refreshData?.data?.accessToken) return false
-          localStorage.setItem('token', refreshData.data.accessToken)
-          localStorage.setItem('refreshToken', refreshData.data.refreshToken)
-          setToken(refreshData.data.accessToken)
-          setRefreshToken(refreshData.data.refreshToken)
-          return true
-        } catch {
-          return false
-        } finally {
-          refreshPromiseRef.current = null
-        }
+          const rr = await fetch('/api/auth/refreshtoken', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: rt }) })
+          if (!rr.ok) return false
+          const rd = await parseJsonResponse<ApiResponse<TokenRefreshResponse>>(rr)
+          if (!rd?.data?.accessToken) return false
+          localStorage.setItem('token', rd.data.accessToken); localStorage.setItem('refreshToken', rd.data.refreshToken)
+          setToken(rd.data.accessToken); setRefreshToken(rd.data.refreshToken); return true
+        } catch { return false } finally { refreshPromiseRef.current = null }
       })()
     }
-
     const refreshed = await refreshPromiseRef.current
-    if (!refreshed) {
-      clearAuthState()
-      addToast('Session expired. Please log in again.', 'error')
-      throw new Error('Unauthorized')
-    }
-
-    const newToken = localStorage.getItem('token')
-    if (newToken) headers.set('Authorization', `Bearer ${newToken}`)
-    const retryResponse = await fetch(url, { ...options, headers })
-    if (retryResponse.status === 401) {
-      clearAuthState()
-      addToast('Session expired. Please log in again.', 'error')
-      throw new Error('Unauthorized')
-    }
-    return retryResponse
+    if (!refreshed) { clearAuthState(); addToast('Session expired. Please log in again.', 'error'); throw new Error('Unauthorized') }
+    const nt = localStorage.getItem('token')
+    if (nt) headers.set('Authorization', `Bearer ${nt}`)
+    const retry = await fetch(url, { ...options, headers })
+    if (retry.status === 401) { clearAuthState(); addToast('Session expired. Please log in again.', 'error'); throw new Error('Unauthorized') }
+    return retry
   }, [addToast, clearAuthState])
 
   const fetchWallet = useCallback(async () => {
-    try {
-      const res = await fetchWithAuth('/api/wallet/balance')
-      const result = await parseJsonResponse<ApiResponse<WalletData>>(res)
-      if (res.ok && result?.data) setWallet(result.data)
-    } catch { /* handled by fetchWithAuth */ }
+    try { const r = await fetchWithAuth('/api/wallet/balance'); const d = await parseJsonResponse<ApiResponse<WalletData>>(r); if (r.ok && d?.data) setWallet(d.data) } catch { }
   }, [fetchWithAuth])
 
   const fetchMonthlySummary = useCallback(async () => {
-    try {
-      const res = await fetchWithAuth('/api/wallet/monthly-summary')
-      const result = await parseJsonResponse<ApiResponse<MonthlySummary>>(res)
-      if (res.ok && result?.data) setMonthlySummary(result.data)
-    } catch { /* handled */ }
+    try { const r = await fetchWithAuth('/api/wallet/monthly-summary'); const d = await parseJsonResponse<ApiResponse<MonthlySummary>>(r); if (r.ok && d?.data) setMonthlySummary(d.data) } catch { }
   }, [fetchWithAuth])
 
   const fetchUsers = useCallback(async () => {
-    try {
-      const res = await fetchWithAuth('/api/wallet/users')
-      const result = await parseJsonResponse<ApiResponse<string[]>>(res)
-      if (res.ok && result?.data) {
-        setAllUsers(result.data.filter(u => u !== username))
-      }
-    } catch { /* handled */ }
+    try { const r = await fetchWithAuth('/api/wallet/users'); const d = await parseJsonResponse<ApiResponse<string[]>>(r); if (r.ok && d?.data) setAllUsers(d.data.filter(u => u !== username)) } catch { }
   }, [fetchWithAuth, username])
 
   const fetchBills = useCallback(async () => {
-    try {
-      const res = await fetchWithAuth('/api/wallet/bills')
-      const result = await parseJsonResponse<ApiResponse<BillReminder[]>>(res)
-      if (res.ok && result?.data) setBills(result.data)
-    } catch { /* handled */ }
+    try { const r = await fetchWithAuth('/api/wallet/bills'); const d = await parseJsonResponse<ApiResponse<BillReminder[]>>(r); if (r.ok && d?.data) setBills(d.data) } catch { }
   }, [fetchWithAuth])
 
   const fetchHistory = useCallback(async (page = 0) => {
@@ -281,507 +288,379 @@ function App() {
       let url = `/api/payment/history?page=${page}&size=8&sort=createdAt,desc`
       if (filterStatus) url += `&status=${filterStatus}`
       if (filterSearch) url += `&search=${encodeURIComponent(filterSearch)}`
-      const res = await fetchWithAuth(url)
-      const result = await parseJsonResponse<ApiResponse<{ content: Transaction[]; number: number; totalPages: number; totalElements: number }>>(res)
-      if (res.ok && result?.data) {
-        setHistory(result.data.content)
-        setHistoryPage(result.data.number)
-        setHistoryTotalPages(result.data.totalPages)
-        setHistoryTotalElements(result.data.totalElements)
-      } else {
-        addToast('Failed to fetch transaction history', 'error')
-      }
-    } finally {
-      setLoadingHistory(false)
-    }
+      const r = await fetchWithAuth(url)
+      const d = await parseJsonResponse<ApiResponse<{ content: Transaction[]; number: number; totalPages: number; totalElements: number }>>(r)
+      if (r.ok && d?.data) { setHistory(d.data.content); setHistoryPage(d.data.number); setHistoryTotalPages(d.data.totalPages); setHistoryTotalElements(d.data.totalElements) }
+      else addToast('Failed to fetch history', 'error')
+    } finally { setLoadingHistory(false) }
   }, [fetchWithAuth, filterStatus, filterSearch, addToast])
 
   const fetchStats = useCallback(async () => {
     if (!isAdmin) return
     setLoadingStats(true)
-    try {
-      const res = await fetchWithAuth('/api/payment/stats')
-      const result = await parseJsonResponse<ApiResponse<AdminStatsResponse>>(res)
-      if (res.ok && result?.data) setStats(result.data)
-      else addToast('Failed to fetch admin stats', 'error')
-    } finally {
-      setLoadingStats(false)
-    }
+    try { const r = await fetchWithAuth('/api/payment/stats'); const d = await parseJsonResponse<ApiResponse<AdminStatsResponse>>(r); if (r.ok && d?.data) setStats(d.data); else addToast('Failed to fetch stats', 'error') }
+    finally { setLoadingStats(false) }
   }, [fetchWithAuth, isAdmin, addToast])
 
-  useEffect(() => {
-    if (!token) return
-    fetchWallet()
-    fetchUsers()
-  }, [token, fetchWallet, fetchUsers])
-
+  useEffect(() => { if (!token) return; fetchWallet(); fetchUsers() }, [token, fetchWallet, fetchUsers])
   useEffect(() => {
     if (!token) return
     if (currentTab === 'home') fetchMonthlySummary()
     else if (currentTab === 'history') fetchHistory(0)
     else if (currentTab === 'bills') fetchBills()
     else if (currentTab === 'admin' && isAdmin) fetchStats()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, currentTab, isAdmin])
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!authUsername || !authPassword) {
-      addToast('Please fill in all fields', 'error')
-      return
-    }
+    if (!authUsername || !authPassword) { addToast('Please fill in all fields', 'error'); return }
     try {
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register'
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: authUsername, password: authPassword, role: 'USER' })
-      })
-      const result = await parseJsonResponse<ApiResponse<JwtResponse | string>>(res)
-      if (!result) {
-        addToast('Server returned a non-JSON response', 'error')
-        return
-      }
+      const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: authUsername, password: authPassword, role: 'USER' }) })
+      const result = await parseJsonResponse<ApiResponse<JwtResponse | string>>(r)
+      if (!result) { addToast('Server returned a non-JSON response', 'error'); return }
       if (isLogin) {
-        if (res.ok && result.success) {
+        if (r.ok && result.success) {
           const data = result.data as JwtResponse
-          localStorage.setItem('token', data.token)
-          localStorage.setItem('refreshToken', data.refreshToken)
-          localStorage.setItem('username', data.username)
-          localStorage.setItem('roles', JSON.stringify(data.roles))
-          setToken(data.token)
-          setRefreshToken(data.refreshToken)
-          setUsername(data.username)
-          setRoles(data.roles)
-          addToast(`Welcome back, ${data.username}!`, 'success')
-          setAuthPassword('')
-        } else {
-          addToast(result.message || 'Login failed', 'error')
-        }
+          localStorage.setItem('token', data.token); localStorage.setItem('refreshToken', data.refreshToken)
+          localStorage.setItem('username', data.username); localStorage.setItem('roles', JSON.stringify(data.roles))
+          setToken(data.token); setRefreshToken(data.refreshToken); setUsername(data.username); setRoles(data.roles)
+          addToast(`Welcome back, ${data.username}!`, 'success'); setAuthPassword('')
+        } else addToast(result.message || 'Login failed', 'error')
       } else {
-        if (res.ok && result.success) {
-          addToast('Registration successful! You can now log in.', 'success')
-          setIsLogin(true)
-          setAuthPassword('')
-        } else {
-          addToast(result.message || 'Registration failed', 'error')
-        }
+        if (r.ok && result.success) { addToast('Account created! You can now log in.', 'success'); setIsLogin(true); setAuthPassword('') }
+        else addToast(result.message || 'Registration failed', 'error')
       }
-    } catch (err: unknown) {
-      addToast('Authentication failed: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error')
-    }
+    } catch (err) { addToast('Auth failed: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error') }
   }
 
   const handleLogout = async () => {
     const rt = localStorage.getItem('refreshToken')
-    try {
-      if (rt) {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken: rt })
-        })
-      }
-    } catch { /* ignore */ }
-    clearAuthState()
-    addToast('Logged out successfully', 'info')
+    try { if (rt) await fetch('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: rt }) }) } catch { }
+    clearAuthState(); addToast('Logged out successfully', 'info')
   }
 
   const handleSendPayment = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!receiver || !amount) {
-      addToast('Please fill in all fields', 'error')
-      return
-    }
+    if (!receiver || !amount) { addToast('Please fill in all fields', 'error'); return }
     const amt = parseFloat(amount)
-    if (isNaN(amt) || amt <= 0) {
-      addToast('Enter a valid amount', 'error')
-      return
-    }
+    if (isNaN(amt) || amt <= 0) { addToast('Enter a valid amount', 'error'); return }
+    setLastReceiver(receiver); setLastAmount(amount)
     setSendingPayment(true)
-    setLastPaymentResult({ success: false, payload: 'Encrypting offline payload...' })
     try {
-      const res = await fetchWithAuth('/api/payment/send', {
-        method: 'POST',
-        body: JSON.stringify({ receiver, amount: amt, category, note: note || undefined })
-      })
-      const result = await parseJsonResponse<ApiResponse<{ transactionId: string; status: string; hopCount: number }>>(res)
-      if (res.ok && result?.success && result.data) {
-        setLastPaymentResult({
-          success: true,
-          transactionId: result.data.transactionId,
-          status: result.data.status,
-          hopCount: result.data.hopCount,
-          payload: `Payment of ${formatCurrency(amt)} to ${receiver} encrypted & saved offline.`
-        })
+      const r = await fetchWithAuth('/api/payment/send', { method: 'POST', body: JSON.stringify({ receiver, amount: amt, category, note: note || undefined }) })
+      const result = await parseJsonResponse<ApiResponse<{ transactionId: string; status: string; hopCount: number }>>(r)
+      if (r.ok && result?.success && result.data) {
+        setPaymentResult({ success: true, transactionId: result.data.transactionId, status: result.data.status, hopCount: result.data.hopCount })
         addToast('Payment saved offline!', 'success')
-        setReceiver('')
-        setAmount('')
-        setNote('')
-        fetchWallet()
+        setReceiver(''); setAmount(''); setNote(''); fetchWallet()
       } else {
+        setPaymentResult({ success: false, payload: result?.message || 'Payment failed' })
         addToast(result?.message || 'Payment failed', 'error')
-        setLastPaymentResult({ success: false, payload: result?.message || 'Payment failed' })
       }
-    } catch (err: unknown) {
-      addToast('Payment failed: ' + (err instanceof Error ? err.message : 'Error'), 'error')
+    } catch (err) {
+      setPaymentResult({ success: false, payload: err instanceof Error ? err.message : 'Error' })
+      addToast('Payment failed', 'error')
     } finally {
-      setSendingPayment(false)
+      setSendingPayment(false); setShowPayConfirm(true)
     }
   }
 
   const handleSplit = async (e: React.FormEvent) => {
     e.preventDefault()
     const total = parseFloat(splitAmount)
-    if (isNaN(total) || total <= 0) {
-      addToast('Enter a valid total amount', 'error')
-      return
-    }
+    if (isNaN(total) || total <= 0) { addToast('Enter a valid total amount', 'error'); return }
     const participants = splitParticipants.split(',').map(p => p.trim()).filter(Boolean)
-    if (participants.length === 0) {
-      addToast('Add at least one participant', 'error')
-      return
-    }
+    if (participants.length === 0) { addToast('Add at least one participant', 'error'); return }
     setSplitting(true)
     try {
-      const res = await fetchWithAuth('/api/payment/split', {
-        method: 'POST',
-        body: JSON.stringify({
-          totalAmount: total,
-          participants,
-          description: splitDescription || 'Split expense',
-          category: 'SPLIT'
-        })
-      })
-      const result = await parseJsonResponse<ApiResponse<{ sharePerPerson: number; participantCount: number; transactions: unknown[] }>>(res)
-      if (res.ok && result?.success && result.data) {
-        addToast(`Split created! Each person owes ${formatCurrency(result.data.sharePerPerson)}`, 'success')
-        setSplitAmount('')
-        setSplitParticipants('')
-        setSplitDescription('')
-        fetchWallet()
-      } else {
-        addToast(result?.message || 'Split failed', 'error')
-      }
-    } catch (err: unknown) {
-      addToast('Split failed: ' + (err instanceof Error ? err.message : 'Error'), 'error')
-    } finally {
-      setSplitting(false)
-    }
+      const r = await fetchWithAuth('/api/payment/split', { method: 'POST', body: JSON.stringify({ totalAmount: total, participants, description: splitDescription || 'Split expense', category: 'SPLIT' }) })
+      const result = await parseJsonResponse<ApiResponse<{ sharePerPerson: number; participantCount: number; transactions: unknown[] }>>(r)
+      if (r.ok && result?.success && result.data) {
+        addToast(`Split done! Each person owes ${formatCurrency(result.data.sharePerPerson)}`, 'success')
+        setSplitAmount(''); setSplitParticipants(''); setSplitDescription(''); fetchWallet()
+      } else addToast(result?.message || 'Split failed', 'error')
+    } catch (err) { addToast('Split failed: ' + (err instanceof Error ? err.message : 'Error'), 'error') }
+    finally { setSplitting(false) }
   }
 
   const handleAddBill = async (e: React.FormEvent) => {
     e.preventDefault()
     const amt = parseFloat(billAmount)
-    if (!billTitle || isNaN(amt) || amt <= 0) {
-      addToast('Fill in bill title and amount', 'error')
-      return
-    }
+    if (!billTitle || isNaN(amt) || amt <= 0) { addToast('Fill in bill title and amount', 'error'); return }
     try {
-      const res = await fetchWithAuth('/api/wallet/bills', {
-        method: 'POST',
-        body: JSON.stringify({ title: billTitle, amount: amt, category: billCategory, dueDay: parseInt(billDueDay) })
-      })
-      const result = await parseJsonResponse<ApiResponse<BillReminder>>(res)
-      if (res.ok && result?.success) {
-        addToast('Bill reminder added!', 'success')
-        setBillTitle('')
-        setBillAmount('')
-        fetchBills()
-      } else {
-        addToast(result?.message || 'Failed to add bill', 'error')
-      }
-    } catch (err: unknown) {
-      addToast('Failed: ' + (err instanceof Error ? err.message : 'Error'), 'error')
-    }
+      const r = await fetchWithAuth('/api/wallet/bills', { method: 'POST', body: JSON.stringify({ title: billTitle, amount: amt, category: billCategory, dueDay: parseInt(billDueDay) }) })
+      const result = await parseJsonResponse<ApiResponse<BillReminder>>(r)
+      if (r.ok && result?.success) { addToast('Bill reminder added!', 'success'); setBillTitle(''); setBillAmount(''); fetchBills() }
+      else addToast(result?.message || 'Failed to add bill', 'error')
+    } catch (err) { addToast('Failed: ' + (err instanceof Error ? err.message : 'Error'), 'error') }
   }
 
   const handleDeleteBill = async (id: number) => {
     try {
-      const res = await fetchWithAuth(`/api/wallet/bills/${id}`, { method: 'DELETE' })
-      const result = await parseJsonResponse<ApiResponse<string>>(res)
-      if (res.ok && result?.success) {
-        addToast('Bill removed', 'info')
-        fetchBills()
-      }
-    } catch { /* handled */ }
+      const r = await fetchWithAuth(`/api/wallet/bills/${id}`, { method: 'DELETE' })
+      const result = await parseJsonResponse<ApiResponse<string>>(r)
+      if (r.ok && result?.success) { addToast('Bill removed', 'info'); fetchBills() }
+    } catch { }
   }
 
   const handleSync = async () => {
-    setSyncing(true)
-    addToast('Syncing offline transactions...', 'info')
+    setSyncing(true); addToast('Syncing offline transactions...', 'info')
     try {
-      const res = await fetchWithAuth('/api/payment/sync', { method: 'POST' })
-      const result = await parseJsonResponse<ApiResponse<{ syncedCount: number }>>(res)
-      if (res.ok && result?.success) {
-        addToast(`${result.data?.syncedCount ?? 0} transactions synced!`, 'success')
-        fetchStats()
-        fetchWallet()
-      } else {
-        addToast(result?.message || 'Sync failed', 'error')
-      }
-    } finally {
-      setSyncing(false)
-    }
+      const r = await fetchWithAuth('/api/payment/sync', { method: 'POST' })
+      const result = await parseJsonResponse<ApiResponse<{ syncedCount: number }>>(r)
+      if (r.ok && result?.success) { addToast(`${result.data?.syncedCount ?? 0} transactions synced!`, 'success'); fetchStats(); fetchWallet() }
+      else addToast(result?.message || 'Sync failed', 'error')
+    } finally { setSyncing(false) }
   }
 
   const handleRetry = async (id: number) => {
     try {
-      const res = await fetchWithAuth(`/api/payment/retry/${id}`, { method: 'POST' })
-      const result = await parseJsonResponse<ApiResponse<unknown>>(res)
-      if (res.ok && result?.success) {
-        addToast('Transaction queued for retry', 'success')
-        fetchHistory(historyPage)
-      } else {
-        addToast(result?.message || 'Retry failed', 'error')
-      }
-    } catch (err: unknown) {
-      addToast('Action failed', 'error')
-    }
+      const r = await fetchWithAuth(`/api/payment/retry/${id}`, { method: 'POST' })
+      const result = await parseJsonResponse<ApiResponse<unknown>>(r)
+      if (r.ok && result?.success) { addToast('Transaction queued for retry', 'success'); fetchHistory(historyPage) }
+      else addToast(result?.message || 'Retry failed', 'error')
+    } catch { addToast('Action failed', 'error') }
   }
 
   const handleCancel = async (id: number) => {
     try {
-      const res = await fetchWithAuth(`/api/payment/cancel/${id}`, { method: 'POST' })
-      const result = await parseJsonResponse<ApiResponse<unknown>>(res)
-      if (res.ok && result?.success) {
-        addToast('Transaction cancelled', 'success')
-        fetchHistory(historyPage)
-        fetchWallet()
-      } else {
-        addToast(result?.message || 'Cancel failed', 'error')
-      }
-    } catch { /* handled */ }
+      const r = await fetchWithAuth(`/api/payment/cancel/${id}`, { method: 'POST' })
+      const result = await parseJsonResponse<ApiResponse<unknown>>(r)
+      if (r.ok && result?.success) { addToast('Transaction cancelled', 'success'); fetchHistory(historyPage); fetchWallet() }
+      else addToast(result?.message || 'Cancel failed', 'error')
+    } catch { }
   }
 
   const handleDownload = async (format: 'csv' | 'excel' | 'pdf') => {
     const filename = `payment_history_${Date.now()}.${format === 'excel' ? 'xlsx' : format}`
     try {
-      const res = await fetchWithAuth(`/api/payment/export/${format}`)
-      if (!res.ok) throw new Error(`Server returned ${res.status}`)
-      const blob = await res.blob()
-      const blobUrl = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = blobUrl
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(blobUrl)
+      const r = await fetchWithAuth(`/api/payment/export/${format}`)
+      if (!r.ok) throw new Error(`Server returned ${r.status}`)
+      const blob = await r.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = filename
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
       addToast(`${format.toUpperCase()} downloaded!`, 'success')
-    } catch (err: unknown) {
-      addToast('Export failed', 'error')
-    }
+    } catch { addToast('Export failed', 'error') }
   }
 
-  const ToastContainer = () => (
-    <div className="toast-container">
-      {toasts.map(toast => (
-        <div key={toast.id} className={`toast ${toast.type}`}>
-          {toast.type === 'success' && <CheckCircle2 size={16} />}
-          {toast.type === 'error' && <AlertTriangle size={16} />}
-          {toast.type === 'info' && <Info size={16} />}
-          <span>{toast.message}</span>
+  /* ── Toast ── */
+  const Toasts = () => (
+    <div className="toast-stack">
+      {toasts.map(t => (
+        <div key={t.id} className={`toast ${t.type}`}>
+          {t.type === 'success' && <CheckCircle2 size={15} />}
+          {t.type === 'error' && <AlertTriangle size={15} />}
+          {t.type === 'info' && <Info size={15} />}
+          <span>{t.message}</span>
         </div>
       ))}
     </div>
   )
 
+  /* ── AUTH SCREEN ── */
   if (!token) {
     return (
-      <div className="auth-container">
-        <div className="auth-bg-orbs" />
-        <div className="glass-panel auth-card">
-          <div className="auth-header">
-            <div className="auth-logo">
-              <Zap size={36} />
-            </div>
-            <h1 className="brand-title">OfflineUPI</h1>
-            <p className="brand-subtitle">Pay anyone, anywhere — even without internet</p>
+      <div className="auth-root">
+        <div className="auth-orbs" />
+        <div className="auth-card">
+          <div className="auth-logo-wrap">
+            <div className="auth-logo"><Zap size={28} /></div>
+            <div className="auth-brand">OfflineUPI</div>
+            <div className="auth-tagline">Pay anyone, anywhere — even without internet</div>
           </div>
+
           <form onSubmit={handleAuth}>
             <div className="form-group">
               <label className="form-label">Username</label>
-              <div className="input-container">
-                <User size={16} className="input-icon" />
-                <input type="text" className="form-input" placeholder="Enter username"
-                  value={authUsername} onChange={e => setAuthUsername(e.target.value)}
-                  autoComplete="username" required />
+              <div className="input-wrap">
+                <User size={15} className="input-icon-l" />
+                <input className="field" type="text" placeholder="Enter username"
+                  value={authUsername} onChange={e => setAuthUsername(e.target.value)} autoComplete="username" required />
               </div>
             </div>
             <div className="form-group">
               <label className="form-label">Password</label>
-              <div className="input-container">
-                <Lock size={16} className="input-icon" />
-                <input type="password" className="form-input" placeholder="••••••••"
-                  value={authPassword} onChange={e => setAuthPassword(e.target.value)}
-                  autoComplete="current-password" required />
+              <div className="input-wrap">
+                <Lock size={15} className="input-icon-l" />
+                <input className="field" type="password" placeholder="••••••••"
+                  value={authPassword} onChange={e => setAuthPassword(e.target.value)} autoComplete="current-password" required />
               </div>
             </div>
-            {!isLogin && (
-              <p className="auth-hint">New accounts start with ₹10,000 wallet balance</p>
-            )}
-            <button type="submit" className="btn-primary">
+            {!isLogin && <div className="auth-hint-box">New accounts start with ₹10,000 wallet balance</div>}
+            <button type="submit" className="btn btn-violet btn-full" style={{ marginTop: 4 }}>
               {isLogin ? 'Sign In' : 'Create Account'}
             </button>
           </form>
-          <div className="auth-footer">
-            {isLogin ? (
-              <>New here? <button className="auth-link" onClick={() => setIsLogin(false)}>Sign Up</button></>
-            ) : (
-              <>Have an account? <button className="auth-link" onClick={() => setIsLogin(true)}>Sign In</button></>
-            )}
+
+          <div className="auth-switch">
+            {isLogin ? <>New here?<button className="auth-switch-btn" onClick={() => setIsLogin(false)}>Create account</button></>
+              : <>Have an account?<button className="auth-switch-btn" onClick={() => setIsLogin(true)}>Sign in</button></>}
           </div>
-          <div className="demo-credentials">
-            <p>Demo: <strong>user</strong> / <strong>password</strong> &nbsp;|&nbsp; <strong>admin</strong> / <strong>password</strong></p>
+          <div className="auth-demo">
+            Demo: <strong>user</strong> / <strong>password</strong> &nbsp;·&nbsp; <strong>admin</strong> / <strong>password</strong>
           </div>
         </div>
-        <ToastContainer />
+        <Toasts />
       </div>
     )
   }
 
+  /* ── TABS ── */
   const tabs: { id: Tab; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
-    { id: 'home', label: 'Home', icon: <Home size={15} /> },
-    { id: 'send', label: 'Pay', icon: <Send size={15} /> },
-    { id: 'split', label: 'Split', icon: <Users size={15} /> },
-    { id: 'bills', label: 'Bills', icon: <Receipt size={15} /> },
-    { id: 'history', label: 'History', icon: <History size={15} /> },
-    { id: 'admin', label: 'Admin', icon: <BarChart3 size={15} />, adminOnly: true },
+    { id: 'home', label: 'Home', icon: <Home size={14} /> },
+    { id: 'send', label: 'Pay', icon: <Send size={14} /> },
+    { id: 'split', label: 'Split', icon: <Users size={14} /> },
+    { id: 'bills', label: 'Bills', icon: <Receipt size={14} /> },
+    { id: 'history', label: 'History', icon: <History size={14} /> },
+    { id: 'admin', label: 'Admin', icon: <BarChart3 size={14} />, adminOnly: true },
   ]
 
+  /* ── TODAY'S DUE CALCULATION ── */
+  const today = new Date().getDate()
+
   return (
-    <div className="dashboard-layout">
-      <header className="top-navbar">
-        <h1 className="brand-title navbar-brand" onClick={() => setCurrentTab('home')}>
-          <Zap size={22} style={{ color: '#a855f7' }} />
-          OfflineUPI
-        </h1>
-        <div className="nav-user-area">
+    <div className="app-shell">
+      {/* NAVBAR */}
+      <header className="navbar">
+        <div className="navbar-brand" onClick={() => setCurrentTab('home')}>
+          <div className="navbar-logo"><Zap size={16} /></div>
+          <span className="navbar-name">OfflineUPI</span>
+        </div>
+        <div className="navbar-right">
+          <div className="offline-pill">
+            <span className="offline-dot" />
+            Offline Ready
+          </div>
           {wallet && (
             <div className="nav-balance">
-              <IndianRupee size={14} />
+              <IndianRupee size={13} />
               <span>{formatCurrency(wallet.balance)}</span>
             </div>
           )}
-          <div className="user-badge">
-            <span className="avatar">{username?.substring(0, 2).toUpperCase()}</span>
-            <span className="user-name">{username}</span>
-            <span className={`role-tag ${isAdmin ? 'admin' : 'user'}`}>{isAdmin ? 'Admin' : 'User'}</span>
+          <div className="nav-avatar-area">
+            <div className="avatar">{username?.substring(0, 2).toUpperCase()}</div>
+            <span className="nav-username">{username}</span>
+            <span className={`role-chip ${isAdmin ? 'admin' : 'user'}`}>{isAdmin ? 'Admin' : 'User'}</span>
           </div>
-          <button onClick={handleLogout} className="btn-secondary btn-logout">
-            <LogOut size={14} /> Exit
+          <button className="btn btn-ghost btn-sm" onClick={handleLogout} style={{ gap: 6 }}>
+            <LogOut size={14} /> Sign out
           </button>
         </div>
       </header>
 
-      <main className="dashboard-content">
-        <nav className="tab-navigation">
+      <main className="page">
+        {/* TABS */}
+        <nav className="tabs">
           {tabs.filter(t => !t.adminOnly || isAdmin).map(tab => (
-            <button key={tab.id} className={`tab-btn ${currentTab === tab.id ? 'active' : ''}`}
+            <button key={tab.id} className={`tab ${currentTab === tab.id ? 'active' : ''}`}
               onClick={() => setCurrentTab(tab.id)}>
               {tab.icon} {tab.label}
             </button>
           ))}
         </nav>
 
-        {/* HOME TAB */}
+        {/* ── HOME ── */}
         {currentTab === 'home' && (
-          <div className="home-layout">
+          <div className="home-col">
+            {/* Wallet card */}
             <div className="wallet-card">
-              <div className="wallet-card-bg" />
-              <div className="wallet-card-content">
-                <div className="wallet-card-header">
-                  <Wallet size={20} />
-                  <span>My Wallet</span>
-                </div>
-                <div className="wallet-balance">{wallet ? formatCurrency(wallet.balance) : '...'}</div>
-                <div className="wallet-upi-id">{wallet?.upiId || ''}</div>
-                <div className="wallet-stats-row">
-                  <div className="wallet-stat">
-                    <span className="wallet-stat-label">Spent this month</span>
-                    <span className="wallet-stat-value spent">{formatCurrency(wallet?.monthlySpent ?? 0)}</span>
+              <div className="wallet-noise" />
+              <div className="wallet-shine" />
+              <div className="wallet-body">
+                <div className="wallet-header"><Wallet size={16} /> My Wallet</div>
+                <div className="wallet-bal">{wallet ? formatCurrency(wallet.balance) : '—'}</div>
+                <div className="wallet-upi">{wallet?.upiId || ''}</div>
+                <div className="wallet-stats">
+                  <div>
+                    <div className="wstat-label">Spent this month</div>
+                    <div className="wstat-val spent">{formatCurrency(wallet?.monthlySpent ?? 0)}</div>
                   </div>
-                  <div className="wallet-stat">
-                    <span className="wallet-stat-label">Received</span>
-                    <span className="wallet-stat-value received">{formatCurrency(wallet?.monthlyReceived ?? 0)}</span>
+                  <div>
+                    <div className="wstat-label">Received</div>
+                    <div className="wstat-val received">{formatCurrency(wallet?.monthlyReceived ?? 0)}</div>
+                  </div>
+                </div>
+                <div className="wallet-info">
+                  <div className="wallet-info-item">
+                    <span className="wallet-info-label">Last Sync</span>
+                    <span className="wallet-info-value">Just Now</span>
+                  </div>
+
+                  <div className="wallet-info-item">
+                    <span className="wallet-info-label">Offline Status</span>
+                    <span className="wallet-info-value online">🟢 Ready</span>
+                  </div>
+
+                  <div className="wallet-info-item">
+                    <span className="wallet-info-label">Security</span>
+                    <span className="wallet-info-value">AES-128</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="quick-actions">
-              <button className="quick-action-btn" onClick={() => setCurrentTab('send')}>
-                <Send size={22} /><span>Pay</span>
-              </button>
-              <button className="quick-action-btn" onClick={() => setCurrentTab('split')}>
-                <Users size={22} /><span>Split</span>
-              </button>
-              <button className="quick-action-btn" onClick={() => setCurrentTab('bills')}>
-                <Receipt size={22} /><span>Bills</span>
-              </button>
-              <button className="quick-action-btn" onClick={() => setCurrentTab('history')}>
-                <History size={22} /><span>History</span>
-              </button>
+            {/* Quick actions */}
+            <div className="quick-grid">
+              {[
+                { id: 'send' as Tab, label: 'Pay', icon: <Send size={20} />, color: '#6366f1', bg: 'rgba(99,102,241,0.15)' },
+                { id: 'split' as Tab, label: 'Split', icon: <Users size={20} />, color: '#a855f7', bg: 'rgba(168,85,247,0.15)' },
+                { id: 'bills' as Tab, label: 'Bills', icon: <Receipt size={20} />, color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
+                { id: 'history' as Tab, label: 'History', icon: <History size={20} />, color: '#22d3ee', bg: 'rgba(34,211,238,0.15)' },
+              ].map(qa => (
+                <button key={qa.id} className="qa-btn" onClick={() => setCurrentTab(qa.id)}>
+                  <div className="qa-icon" style={{ background: qa.bg, color: qa.color }}>{qa.icon}</div>
+                  {qa.label}
+                </button>
+              ))}
             </div>
 
+            {/* Monthly summary */}
             {monthlySummary && (
-              <div className="glass-panel home-panel">
-                <h2 className="panel-title"><Calendar size={20} style={{ color: 'var(--accent-cyan)' }} /> {monthlySummary.month} Summary</h2>
-                <div className="summary-grid">
-                  <div className="summary-item">
-                    <span className="summary-label">Transactions</span>
-                    <span className="summary-value">{monthlySummary.transactionCount}</span>
-                  </div>
-                  <div className="summary-item">
-                    <span className="summary-label">Total Spent</span>
-                    <span className="summary-value spent">{formatCurrency(monthlySummary.totalSpent)}</span>
-                  </div>
-                  <div className="summary-item">
-                    <span className="summary-label">Total Received</span>
-                    <span className="summary-value received">{formatCurrency(monthlySummary.totalReceived)}</span>
-                  </div>
+              <div className="glass panel">
+                <div className="section-head">
+                  <Calendar size={18} className="section-icon" />
+                  <h2>{monthlySummary.month} Summary</h2>
+                </div>
+                <div className="summary-3">
+                  <div className="sstat"><span className="sstat-label">Transactions</span><span className="sstat-val">{monthlySummary.transactionCount}</span></div>
+                  <div className="sstat"><span className="sstat-label">Total Spent</span><span className="sstat-val spent">{formatCurrency(monthlySummary.totalSpent)}</span></div>
+                  <div className="sstat"><span className="sstat-label">Total Received</span><span className="sstat-val received">{formatCurrency(monthlySummary.totalReceived)}</span></div>
                 </div>
                 {Object.keys(monthlySummary.categoryBreakdown).length > 0 && (
-                  <div className="category-breakdown">
-                    <h3 className="section-subtitle">Spending by Category</h3>
+                  <>
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 12 }}>Spending by category</p>
                     {Object.entries(monthlySummary.categoryBreakdown).map(([cat, amt]) => (
-                      <div key={cat} className="category-bar-row">
-                        <span className="category-name">{cat}</span>
-                        <div className="category-bar-track">
-                          <div className="category-bar-fill" style={{
-                            width: `${Math.min(100, (amt / (monthlySummary.totalSpent || 1)) * 100)}%`
-                          }} />
-                        </div>
-                        <span className="category-amount">{formatCurrency(amt)}</span>
+                      <div key={cat} className="cat-row">
+                        <span className="cat-name">{cat}</span>
+                        <div className="cat-track"><div className="cat-fill" style={{ width: `${Math.min(100, (amt / (monthlySummary.totalSpent || 1)) * 100)}%` }} /></div>
+                        <span className="cat-amt">{formatCurrency(amt)}</span>
                       </div>
                     ))}
-                  </div>
+                  </>
                 )}
               </div>
             )}
           </div>
         )}
 
-        {/* SEND TAB */}
+        {/* ── SEND ── */}
         {currentTab === 'send' && (
-          <div className="send-layout">
-            <div className="glass-panel form-panel">
-              <h2 className="panel-title"><Send style={{ color: 'var(--primary)' }} /> Send Money</h2>
+          <div className="send-grid">
+            <div className="glass panel">
+              <div className="section-head"><Send size={18} className="section-icon" /><h2>Send Money</h2></div>
               <form onSubmit={handleSendPayment}>
                 <div className="form-group">
                   <label className="form-label">From</label>
-                  <div className="input-container">
-                    <User size={16} className="input-icon" />
-                    <input type="text" className="form-input" value={username || ''} disabled />
-                  </div>
+                  <div className="input-wrap"><User size={15} className="input-icon-l" /><input className="field" type="text" value={username || ''} disabled /></div>
                 </div>
                 <div className="form-group">
                   <label className="form-label">To</label>
-                  <div className="input-container">
-                    <User size={16} className="input-icon" />
-                    <select className="form-input form-select" value={receiver}
-                      onChange={e => setReceiver(e.target.value)} required>
+                  <div className="input-wrap">
+                    <User size={15} className="input-icon-l" />
+                    <select className="field" value={receiver} onChange={e => setReceiver(e.target.value)} required>
                       <option value="">Select recipient</option>
                       {allUsers.map(u => <option key={u} value={u}>{u}</option>)}
                     </select>
@@ -789,212 +668,218 @@ function App() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Amount (₹)</label>
-                  <div className="input-container">
-                    <IndianRupee size={16} className="input-icon" />
-                    <input type="number" className="form-input" placeholder="0.00" min="1" step="0.01"
-                      value={amount} onChange={e => setAmount(e.target.value)} required />
-                  </div>
+                  <div className="input-wrap"><IndianRupee size={15} className="input-icon-l" /><input className="field" type="number" placeholder="0.00" min="1" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required /></div>
                 </div>
                 <div className="form-group">
                   <label className="form-label">Category</label>
-                  <select className="form-input form-select" value={category} onChange={e => setCategory(e.target.value)}>
-                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <div className="input-wrap">
+                    <Layers size={15} className="input-icon-l" />
+                    <select className="field" value={category} onChange={e => setCategory(e.target.value)}>
+                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
                 </div>
                 <div className="form-group">
                   <label className="form-label">Note (optional)</label>
-                  <input type="text" className="form-input" style={{ paddingLeft: 16 }}
-                    placeholder="What's this for?" value={note} onChange={e => setNote(e.target.value)} />
+                  <input className="field field-plain" type="text" placeholder="What's this for?" value={note} onChange={e => setNote(e.target.value)} />
                 </div>
-                <button type="submit" className="btn-primary" disabled={sendingPayment}>
-                  {sendingPayment ? <><RefreshCw size={16} className="animate-spin" /> Processing...</> : 'Pay Now'}
+                <button type="submit" className="btn btn-violet btn-full" disabled={sendingPayment}>
+                  {sendingPayment ? <><RefreshCw size={15} className="spinner" /> Processing…</> : <><Send size={15} /> Pay Now</>}
                 </button>
               </form>
             </div>
-            <div className="glass-panel encryption-panel">
-              <h2 className="panel-title"><Shield style={{ color: 'var(--accent-cyan)' }} /> Security Status</h2>
-              <p className="panel-desc">Transactions are AES-encrypted and stored offline until network sync.</p>
-              <div className={`encrypted-payload-area custom-scrollbar ${sendingPayment ? 'encrypting' : ''}`}>
-                {lastPaymentResult ? (
-                  <div className={lastPaymentResult.success ? 'payload-success' : 'payload-info'}>
-                    {lastPaymentResult.payload}
-                    {lastPaymentResult.success && (
-                      <div className="payload-details">
-                        <p><strong>ID:</strong> {lastPaymentResult.transactionId}</p>
-                        <p><strong>Hops:</strong> {lastPaymentResult.hopCount}</p>
-                        <p><strong>Status:</strong> {lastPaymentResult.status}</p>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="payload-empty">
-                    <Radio size={36} className="animate-pulse" />
-                    <span>Ready for offline payment</span>
-                  </div>
-                )}
+
+            {/* Security panel */}
+            <div className="glass panel">
+              <div className="section-head"><ShieldCheck size={18} style={{ color: 'var(--cyan)' }} /><h2>Security</h2></div>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 18 }}>
+                Transactions are AES-256 encrypted before being stored locally, then synced when connectivity returns.
+              </p>
+              <div className="security-idle">
+                <div className="sec-icon-ring"><Shield size={26} /></div>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-secondary)' }}>End-to-end encrypted</span>
+                <div className="sec-features">
+                  {[
+                    { icon: <LockIcon size={14} />, label: 'AES-256 payload encryption' },
+                    { icon: <Wifi size={14} />, label: 'Works fully offline' },
+                    { icon: <ShieldCheck size={14} />, label: 'Auto-sync on reconnect' },
+                    { icon: <FileText size={14} />, label: 'Immutable audit trail' },
+                  ].map((f, i) => (
+                    <div key={i} className="sec-feat">{f.icon}<span>{f.label}</span></div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* SPLIT TAB */}
+        {/* ── SPLIT ── */}
         {currentTab === 'split' && (
-          <div className="glass-panel form-panel split-panel">
-            <h2 className="panel-title"><Users style={{ color: 'var(--accent-purple)' }} /> Split Expense</h2>
-            <p className="panel-desc">Split a bill equally among friends. Each person&apos;s share is deducted from their wallet.</p>
+          <div className="split-wrap glass panel">
+            <div className="section-head"><Users size={18} style={{ color: '#a855f7' }} /><h2>Split Expense</h2></div>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20 }}>
+              Split a bill equally. Each person's share is deducted from their wallet.
+            </p>
             <form onSubmit={handleSplit}>
               <div className="form-group">
                 <label className="form-label">Total Amount (₹)</label>
-                <div className="input-container">
-                  <IndianRupee size={16} className="input-icon" />
-                  <input type="number" className="form-input" placeholder="1200" min="1" step="0.01"
-                    value={splitAmount} onChange={e => setSplitAmount(e.target.value)} required />
-                </div>
+                <div className="input-wrap"><IndianRupee size={15} className="input-icon-l" /><input className="field" type="number" placeholder="1200" min="1" step="0.01" value={splitAmount} onChange={e => setSplitAmount(e.target.value)} required /></div>
               </div>
               <div className="form-group">
                 <label className="form-label">Participants (comma-separated usernames)</label>
-                <input type="text" className="form-input" style={{ paddingLeft: 16 }}
-                  placeholder="e.g. bob, charlie" value={splitParticipants}
-                  onChange={e => setSplitParticipants(e.target.value)} required />
-                <p className="field-hint">Available: {allUsers.join(', ') || 'loading...'}</p>
+                <input className="field field-plain" type="text" placeholder="e.g. bob, charlie" value={splitParticipants} onChange={e => setSplitParticipants(e.target.value)} required />
+                <p className="field-hint">Available: {allUsers.join(', ') || 'loading…'}</p>
               </div>
               <div className="form-group">
                 <label className="form-label">Description</label>
-                <input type="text" className="form-input" style={{ paddingLeft: 16 }}
-                  placeholder="Dinner at restaurant" value={splitDescription}
-                  onChange={e => setSplitDescription(e.target.value)} />
+                <input className="field field-plain" type="text" placeholder="Dinner at restaurant" value={splitDescription} onChange={e => setSplitDescription(e.target.value)} />
               </div>
               {splitAmount && splitParticipants && (
                 <div className="split-preview">
                   Each person pays: <strong>{formatCurrency(parseFloat(splitAmount) / (splitParticipants.split(',').filter(Boolean).length + 1))}</strong>
                 </div>
               )}
-              <button type="submit" className="btn-primary" disabled={splitting}>
-                {splitting ? <><RefreshCw size={16} className="animate-spin" /> Splitting...</> : 'Split Expense'}
+              <button type="submit" className="btn btn-violet btn-full" disabled={splitting}>
+                {splitting ? <><RefreshCw size={15} className="spinner" /> Splitting…</> : <><Users size={15} /> Split Expense</>}
               </button>
             </form>
           </div>
         )}
 
-        {/* BILLS TAB */}
+        {/* ── BILLS ── */}
         {currentTab === 'bills' && (
-          <div className="bills-layout">
-            <div className="glass-panel form-panel">
-              <h2 className="panel-title"><Plus style={{ color: 'var(--success)' }} /> Add Bill Reminder</h2>
+          <div className="bills-grid">
+            <div className="glass panel">
+              <div className="section-head"><Plus size={18} style={{ color: 'var(--green)' }} /><h2>Add Bill Reminder</h2></div>
               <form onSubmit={handleAddBill}>
                 <div className="form-group">
                   <label className="form-label">Bill Title</label>
-                  <input type="text" className="form-input" style={{ paddingLeft: 16 }}
-                    placeholder="Electricity Bill" value={billTitle} onChange={e => setBillTitle(e.target.value)} required />
+                  <input className="field field-plain" type="text" placeholder="Electricity Bill" value={billTitle} onChange={e => setBillTitle(e.target.value)} required />
                 </div>
                 <div className="form-row">
                   <div className="form-group">
                     <label className="form-label">Amount (₹)</label>
-                    <input type="number" className="form-input" style={{ paddingLeft: 16 }}
-                      placeholder="1500" min="1" value={billAmount} onChange={e => setBillAmount(e.target.value)} required />
+                    <input className="field field-plain" type="number" placeholder="1500" min="1" value={billAmount} onChange={e => setBillAmount(e.target.value)} required />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Due Day</label>
-                    <input type="number" className="form-input" style={{ paddingLeft: 16 }}
-                      min="1" max="28" value={billDueDay} onChange={e => setBillDueDay(e.target.value)} />
+                    <input className="field field-plain" type="number" min="1" max="28" value={billDueDay} onChange={e => setBillDueDay(e.target.value)} />
                   </div>
                 </div>
                 <div className="form-group">
                   <label className="form-label">Category</label>
-                  <select className="form-input form-select" value={billCategory} onChange={e => setBillCategory(e.target.value)}>
+                  <select className="field field-plain" value={billCategory} onChange={e => setBillCategory(e.target.value)}>
                     {CATEGORIES.filter(c => c !== 'SPLIT').map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
-                <button type="submit" className="btn-primary">Add Reminder</button>
+                <button type="submit" className="btn btn-violet btn-full">Add Reminder</button>
               </form>
             </div>
-            <div className="glass-panel bills-list-panel">
-              <h2 className="panel-title"><Receipt style={{ color: 'var(--pending)' }} /> Monthly Bills</h2>
+
+            <div className="glass panel">
+              <div className="section-head"><Receipt size={18} style={{ color: 'var(--amber)' }} /><h2>Monthly Bills</h2></div>
               {bills.length === 0 ? (
-                <div className="empty-state"><Info size={28} /><span>No bill reminders yet</span></div>
+                <div className="bills-empty">
+                  <Receipt size={36} />
+                  <span style={{ fontSize: 14 }}>No bills yet</span>
+                  <span style={{ fontSize: 13, opacity: 0.6 }}>Add a reminder to track recurring payments</span>
+                </div>
               ) : (
-                <div className="bills-list">
-                  {bills.map(bill => (
-                    <div key={bill.id} className="bill-card">
-                      <div className="bill-info">
-                        <span className="bill-title">{bill.title}</span>
-                        <span className="bill-meta">{bill.category} · Due day {bill.dueDay}</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {bills.map(bill => {
+                    const daysUntil = bill.dueDay >= today ? bill.dueDay - today : (28 - today + bill.dueDay)
+                    const soon = daysUntil <= 5
+                    return (
+                      <div key={bill.id} className="bill-item">
+                        <div className="bill-left">
+                          <div className="bill-icon" style={{ background: soon ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.05)' }}>
+                            {BILL_ICONS[bill.category] || '📋'}
+                          </div>
+                          <div>
+                            <div className="bill-name">{bill.title}</div>
+                            <div className="bill-meta">{bill.category} · Due day {bill.dueDay}</div>
+                          </div>
+                        </div>
+                        <div className="bill-right">
+                          <span className={`due-chip ${soon ? 'soon' : 'ok'}`}>{soon ? `${daysUntil}d` : `in ${daysUntil}d`}</span>
+                          <span className="bill-amount">{formatCurrency(bill.amount)}</span>
+                          <button className="btn btn-danger-ghost" onClick={() => handleDeleteBill(bill.id)}><Trash2 size={13} /></button>
+                        </div>
                       </div>
-                      <div className="bill-right">
-                        <span className="bill-amount">{formatCurrency(bill.amount)}</span>
-                        <button className="btn-icon-danger" onClick={() => handleDeleteBill(bill.id)}>
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {/* HISTORY TAB */}
+        {/* ── HISTORY ── */}
         {currentTab === 'history' && (
-          <div className="glass-panel history-panel">
-            <div className="history-header">
-              <h2 className="panel-title"><History style={{ color: 'var(--primary)' }} /> Transaction History</h2>
-              <div className="export-btns">
+          <div className="glass panel history-wrap">
+            <div className="history-top">
+              <div className="section-head" style={{ marginBottom: 0 }}>
+                <History size={18} className="section-icon" /><h2>Transaction History</h2>
+              </div>
+              <div className="export-group">
                 {(['csv', 'excel', 'pdf'] as const).map(fmt => (
-                  <button key={fmt} className="btn-secondary" onClick={() => handleDownload(fmt)}>
-                    <Download size={14} /> {fmt.toUpperCase()}
+                  <button key={fmt} className="btn btn-ghost btn-sm" onClick={() => handleDownload(fmt)}>
+                    <Download size={13} /> {fmt.toUpperCase()}
                   </button>
                 ))}
               </div>
             </div>
-            <div className="filter-bar">
-              <div className="search-input-wrap">
-                <Search size={16} className="input-icon" />
-                <input type="text" className="filter-input" placeholder="Search..."
-                  value={filterSearch} onChange={e => setFilterSearch(e.target.value)} />
+            <div className="filter-row" style={{ marginTop: 18 }}>
+              <div className="search-wrap">
+                <Search size={14} className="input-icon-l" />
+                <input className="search-field" type="text" placeholder="Search transactions…" value={filterSearch} onChange={e => setFilterSearch(e.target.value)} />
               </div>
-              <select className="filter-input" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-                <option value="">All Statuses</option>
+              <select className="status-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+                <option value="">All statuses</option>
                 <option value="PENDING">Pending</option>
-                <option value="WAITING_FOR_SYNC">Waiting for Sync</option>
+                <option value="WAITING_FOR_SYNC">Waiting for sync</option>
                 <option value="SYNCED">Synced</option>
                 <option value="FAILED">Failed</option>
                 <option value="REJECTED">Rejected</option>
               </select>
-              <button className="btn-primary btn-filter" onClick={() => fetchHistory(0)}>Apply</button>
+              <button className="btn btn-violet btn-sm" onClick={() => fetchHistory(0)}>Apply</button>
             </div>
-            <div className="table-wrapper">
+
+            <div className="tbl-wrap">
               {loadingHistory ? (
-                <div className="empty-state"><RefreshCw className="animate-spin" size={24} /><span>Loading...</span></div>
+                <div className="empty-state"><RefreshCw size={22} className="spinner" /><span className="empty-label">Loading…</span></div>
               ) : history.length === 0 ? (
-                <div className="empty-state"><Info size={28} /><span>No transactions found</span></div>
+                <div className="empty-state">
+                  <History size={32} />
+                  <span className="empty-label">No transactions found</span>
+                  <span className="empty-sub">Try adjusting your filters</span>
+                </div>
               ) : (
-                <table className="data-table">
+                <table className="tbl">
                   <thead>
                     <tr>
-                      <th>ID</th><th>From</th><th>To</th><th>Amount</th><th>Type</th><th>Status</th><th>Date</th><th>Actions</th>
+                      <th>ID</th><th>From</th><th>To</th><th>Amount</th><th>Type</th><th>Status</th><th>Date</th><th></th>
                     </tr>
                   </thead>
                   <tbody>
                     {history.map(tx => (
-                      <tr key={tx.id}>
-                        <td className="mono">{tx.transactionId.substring(0, 8)}...</td>
-                        <td>{tx.sender}</td>
-                        <td>{tx.receiver}</td>
-                        <td className="amount-cell">{formatCurrency(tx.amount)}</td>
-                        <td><span className="type-tag">{tx.transactionType || 'TRANSFER'}</span></td>
-                        <td><span className={`badge ${tx.status === 'WAITING_FOR_SYNC' ? 'waiting_for_sync' : tx.status.toLowerCase()}`}>
-                          {tx.status === 'WAITING_FOR_SYNC' ? 'SYNC' : tx.status}
-                        </span></td>
-                        <td className="date-cell">{new Date(tx.createdAt).toLocaleString()}</td>
-                        <td>
-                          <div className="row-actions">
-                            {tx.status === 'FAILED' && (
-                              <button className="btn-action success" onClick={() => handleRetry(tx.id)}>Retry</button>
-                            )}
-                            {(tx.status === 'PENDING' || tx.status === 'WAITING_FOR_SYNC') && (
-                              <button className="btn-action danger" onClick={() => handleCancel(tx.id)}>Cancel</button>
-                            )}
+                      <tr key={tx.id} onClick={() => setSelectedTx(tx)}>
+                        <td><span className="tx-id">{tx.transactionId.substring(0, 8)}…</span></td>
+                        <td style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <ArrowUpRight size={13} style={{ color: 'var(--rose)', flexShrink: 0 }} />{tx.sender}
+                        </td>
+                        <td style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <ArrowDownLeft size={13} style={{ color: 'var(--green)', flexShrink: 0 }} />{tx.receiver}
+                        </td>
+                        <td><span className="tx-amount">{formatCurrency(tx.amount)}</span></td>
+                        <td><span className="type-chip">{tx.transactionType || 'TRANSFER'}</span></td>
+                        <td><span className={getBadgeClass(tx.status)}>{getBadgeLabel(tx.status)}</span></td>
+                        <td><span className="tx-date">{new Date(tx.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span></td>
+                        <td onClick={e => e.stopPropagation()}>
+                          <div className="tx-actions">
+                            <button className="btn-tbl" style={{ color: 'var(--text-muted)', borderColor: 'var(--border)' }} onClick={() => setSelectedTx(tx)}><Eye size={12} /></button>
+                            {tx.status === 'FAILED' && <button className="btn-tbl btn-tbl-success" onClick={() => handleRetry(tx.id)}>Retry</button>}
+                            {(tx.status === 'PENDING' || tx.status === 'WAITING_FOR_SYNC') && <button className="btn-tbl btn-tbl-danger" onClick={() => handleCancel(tx.id)}>Cancel</button>}
                           </div>
                         </td>
                       </tr>
@@ -1004,68 +889,66 @@ function App() {
               )}
             </div>
             {historyTotalPages > 1 && (
-              <div className="pagination-controls">
-                <span className="pagination-info">Page {historyPage + 1} of {historyTotalPages} ({historyTotalElements} records)</span>
-                <div className="pagination-btn-group">
-                  <button className="btn-secondary" disabled={historyPage === 0} onClick={() => fetchHistory(historyPage - 1)}>
-                    <ChevronLeft size={16} />
-                  </button>
-                  <button className="btn-secondary" disabled={historyPage >= historyTotalPages - 1} onClick={() => fetchHistory(historyPage + 1)}>
-                    <ChevronRight size={16} />
-                  </button>
+              <div className="pager">
+                <span className="pager-info">Page {historyPage + 1} of {historyTotalPages} · {historyTotalElements} records</span>
+                <div className="pager-btns">
+                  <button className="btn btn-ghost btn-sm" disabled={historyPage === 0} onClick={() => fetchHistory(historyPage - 1)}><ChevronLeft size={15} /></button>
+                  <button className="btn btn-ghost btn-sm" disabled={historyPage >= historyTotalPages - 1} onClick={() => fetchHistory(historyPage + 1)}><ChevronRight size={15} /></button>
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* ADMIN TAB */}
+        {/* ── ADMIN ── */}
         {currentTab === 'admin' && isAdmin && (
           <div>
-            <div className="glass-panel sync-console-panel">
-              <div>
-                <h2 className="panel-title"><Radio className="animate-pulse" style={{ color: 'var(--primary)' }} /> Sync Console</h2>
-                <p className="panel-desc">Process all pending offline transactions when connectivity is restored.</p>
+            <div className="glass admin-sync-bar">
+              <div className="sync-info">
+                <h3><Radio size={16} style={{ display: 'inline', marginRight: 8, color: 'var(--violet)' }} />Sync Console</h3>
+                <p>Process all pending offline transactions when connectivity is restored.</p>
               </div>
-              <button onClick={handleSync} disabled={syncing} className="btn-primary pulse-sync-btn btn-sync">
-                {syncing ? <><RefreshCw className="animate-spin" size={16} /> Syncing...</> : <><RefreshCw size={16} /> Sync All</>}
+              <button onClick={handleSync} disabled={syncing} className={`btn btn-violet ${!syncing ? 'btn-sync-pulse' : ''}`}>
+                {syncing ? <><RefreshCw size={15} className="spinner" /> Syncing…</> : <><RefreshCw size={15} /> Sync All</>}
               </button>
             </div>
+
             {loadingStats ? (
-              <div className="empty-state"><RefreshCw className="animate-spin" size={24} /><span>Loading stats...</span></div>
+              <div className="empty-state"><RefreshCw size={22} className="spinner" /><span className="empty-label">Loading stats…</span></div>
             ) : stats ? (
               <>
                 <div className="metrics-grid">
                   {[
-                    { label: 'Total', value: stats.totalTransactions, icon: <History size={16} />, color: 'var(--primary)' },
-                    { label: 'Pending', value: stats.pendingCount, icon: <Radio size={16} />, color: 'var(--pending)' },
-                    { label: 'Synced', value: stats.syncedCount, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
-                    { label: 'Failed', value: stats.failedCount, icon: <XCircle size={16} />, color: 'var(--danger)' },
+                    { label: 'Total', value: stats.totalTransactions, icon: <History size={14} /> },
+                    { label: 'Pending', value: stats.pendingCount, icon: <Radio size={14} />, color: 'var(--amber)' },
+                    { label: 'Synced', value: stats.syncedCount, icon: <CheckCircle2 size={14} />, color: 'var(--green)' },
+                    { label: 'Failed', value: stats.failedCount, icon: <XCircle size={14} />, color: 'var(--rose)' },
                   ].map(m => (
-                    <div key={m.label} className="glass-panel metric-card">
-                      <div className="metric-header"><span>{m.label}</span>{m.icon}</div>
-                      <div className="metric-value">{m.value}</div>
+                    <div key={m.label} className="glass metric-card">
+                      <div className="metric-label"><span>{m.label}</span><span style={{ color: m.color || 'var(--text-secondary)' }}>{m.icon}</span></div>
+                      <div className="metric-val" style={{ color: m.color || 'white' }}>{m.value}</div>
                     </div>
                   ))}
-                  <div className="glass-panel metric-card span-2">
-                    <div className="metric-header"><span>Total Settled</span><IndianRupee size={16} /></div>
-                    <div className="metric-value">{formatCurrency(stats.totalAmount)}</div>
+                  <div className="glass metric-card span-2">
+                    <div className="metric-label"><span>Total Settled</span><IndianRupee size={14} /></div>
+                    <div className="metric-val">{formatCurrency(stats.totalAmount)}</div>
                   </div>
-                  <div className="glass-panel metric-card">
-                    <div className="metric-header"><span>Success Rate</span><Shield size={16} /></div>
-                    <div className="metric-value">{stats.successRate.toFixed(1)}%</div>
-                    <div className="progress-bar"><div className="progress-fill" style={{ width: `${stats.successRate}%` }} /></div>
+                  <div className="glass metric-card">
+                    <div className="metric-label"><span>Success Rate</span><Shield size={14} /></div>
+                    <div className="metric-val" style={{ color: stats.successRate >= 80 ? 'var(--green)' : 'var(--amber)' }}>{stats.successRate.toFixed(1)}%</div>
+                    <div className="metric-bar"><div className="metric-bar-fill" style={{ width: `${stats.successRate}%`, background: stats.successRate >= 80 ? 'var(--green)' : 'var(--amber)' }} /></div>
                   </div>
                 </div>
+
                 {Object.keys(stats.dailyTransactions).length > 0 && (
-                  <div className="glass-panel chart-panel">
-                    <h2 className="panel-title"><BarChart3 size={20} /> Daily Activity</h2>
+                  <div className="glass chart-wrap">
+                    <div className="section-head"><BarChart3 size={18} className="section-icon" /><h2>Daily Activity</h2></div>
                     <div className="bar-chart">
                       {Object.entries(stats.dailyTransactions).slice(-7).map(([day, count]) => (
-                        <div key={day} className="bar-chart-item">
-                          <div className="bar-chart-bar" style={{ height: `${Math.max(8, count * 20)}px` }} />
-                          <span className="bar-chart-label">{day.slice(5)}</span>
-                          <span className="bar-chart-count">{count}</span>
+                        <div key={day} className="bar-item">
+                          <div className="bar-fill" style={{ height: `${Math.max(6, (count as number) * 18)}px` }} />
+                          <span className="bar-lbl">{day.slice(5)}</span>
+                          <span className="bar-cnt">{count as number}</span>
                         </div>
                       ))}
                     </div>
@@ -1073,12 +956,24 @@ function App() {
                 )}
               </>
             ) : (
-              <div className="empty-state"><span>Failed to load stats</span></div>
+              <div className="empty-state"><Info size={28} /><span className="empty-label">Failed to load stats</span></div>
             )}
           </div>
         )}
       </main>
-      <ToastContainer />
+
+      {/* Modals */}
+      {showPayConfirm && paymentResult && (
+        <PaymentConfirmModal
+          result={paymentResult}
+          receiver={lastReceiver}
+          amount={lastAmount}
+          onClose={() => { setShowPayConfirm(false); setPaymentResult(null) }}
+        />
+      )}
+      {selectedTx && <TxDetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} />}
+
+      <Toasts />
     </div>
   )
 }

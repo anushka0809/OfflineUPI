@@ -156,7 +156,7 @@ public class PaymentService {
         return repository.findAll();
     }
 
-    @Cacheable(value = "transactions", key = "#id")
+    //@Cacheable(value = "transactions", key = "#id")
     public Transaction getTransaction(Long id) {
         return repository.findById(id)
                 .orElseThrow(() -> new TransactionNotFoundException("Transaction with ID " + id + " not found"));
@@ -167,10 +167,10 @@ public class PaymentService {
     }
 
     @Transactional
-    @Caching(evict = {
+    /*@Caching(evict = {
         @CacheEvict(value = "stats", allEntries = true),
         @CacheEvict(value = "transactions", key = "#id")
-    })
+    })*/
     public Transaction retryPayment(Long id, String username, boolean isAdmin) {
         Transaction transaction = getTransaction(id);
         verifyTransactionAccess(transaction, username, isAdmin);
@@ -187,10 +187,10 @@ public class PaymentService {
     }
 
     @Transactional
-    @Caching(evict = {
+    /*@Caching(evict = {
         @CacheEvict(value = "stats", allEntries = true),
         @CacheEvict(value = "transactions", key = "#id")
-    })
+    })*/
     public Transaction cancelPayment(Long id, String username, boolean isAdmin) {
         Transaction transaction = getTransaction(id);
         verifyTransactionAccess(transaction, username, isAdmin);
@@ -313,7 +313,7 @@ public class PaymentService {
         return repository.findAll(spec, pageable);
     }
 
-    @Cacheable(value = "stats")
+    //@Cacheable(value = "stats")
     public AdminStatsResponse getStats() {
         AdminStatsResponse stats = new AdminStatsResponse();
 
