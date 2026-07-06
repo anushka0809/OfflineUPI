@@ -29,7 +29,7 @@ USER app
 
 EXPOSE 8080
 
-HEALTHCHECK --interval=15s --timeout=10s --retries=10 --start-period=60s \
-  CMD curl -f http://localhost:8080/v3/api-docs || exit 1
+HEALTHCHECK --interval=15s --timeout=10s --retries=10 --start-period=90s \
+  CMD curl -f http://localhost:${PORT:-8080}/v3/api-docs || exit 1
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
