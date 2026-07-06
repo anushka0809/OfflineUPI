@@ -27,9 +27,8 @@ COPY --from=build /app/target/OfflineUPI-*.jar app.jar
 
 USER app
 
+# Railway assigns PORT dynamically — expose the default
 EXPOSE 8080
 
-HEALTHCHECK --interval=15s --timeout=10s --retries=10 --start-period=90s \
-  CMD curl -f http://localhost:${PORT:-8080}/v3/api-docs || exit 1
-
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Pass PORT to Spring Boot via system property so it overrides application.properties
+ENTRYPOINT ["sh", "-c", "java -Dserver.port=${PORT:-8080} -jar app.jar"]
