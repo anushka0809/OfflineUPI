@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import MeshPanel from './MeshPanel'
 import {
   Lock, User, Shield, Send, History, LogOut, CheckCircle2, AlertTriangle,
   RefreshCw, XCircle, Search, ChevronLeft, ChevronRight, Download, BarChart3,
@@ -16,7 +17,8 @@ interface Transaction {
   id: number; transactionId: string; sender: string; receiver: string;
   amount: number; status: string; hopCount: number; createdAt: string;
   syncTime: string | null; failureReason: string | null;
-  transactionType?: string; category?: string; note?: string
+  transactionType?: string; category?: string; note?: string;
+  lifecycleState?: string; idempotencyKey?: string; bridgeNodeId?: string; meshHopPath?: string
 }
 interface BillReminder { id: number; title: string; amount: number; category: string; dueDay: number; active: boolean }
 interface AdminStatsResponse {
@@ -53,7 +55,8 @@ function getBadgeClass(status: string) {
   if (s === 'synced') return 'badge badge-synced'
   if (s === 'pending') return 'badge badge-pending'
   if (s === 'waiting_for_sync') return 'badge badge-waiting'
-  if (s === 'failed' || s === 'rejected') return 'badge badge-failed'
+  if (s === 'failed' || s === 'rejected' || s === 'tampered') return 'badge badge-failed'
+  if (s === 'expired' || s === 'duplicate') return 'badge badge-waiting'
   return 'badge badge-pending'
 }
 
@@ -92,6 +95,10 @@ function TxDetailModal({ tx, onClose }: { tx: Transaction; onClose: () => void }
               ['Category', tx.category || '—'],
               ['Hops', tx.hopCount],
               ['Note', tx.note || '—'],
+              ...(tx.lifecycleState ? [['Lifecycle State', <span className="mono-sm">{tx.lifecycleState}</span>]] : []),
+              ...(tx.idempotencyKey ? [['Idempotency Key', <span className="mono-sm">{tx.idempotencyKey.substring(0, 20)}…</span>]] : []),
+              ...(tx.bridgeNodeId ? [['Bridge Node', <span className="mono-sm">{tx.bridgeNodeId}</span>]] : []),
+              ...(tx.meshHopPath ? [['Mesh Path', <span className="mono-sm">{tx.meshHopPath}</span>]] : []),
               ...(tx.syncTime ? [['Synced At', new Date(tx.syncTime).toLocaleString()]] : []),
               ...(tx.failureReason ? [['Failure Reason', <span style={{ color: 'var(--rose)' }}>{tx.failureReason}</span>]] : []),
             ].map(([k, v], i) => (
@@ -112,10 +119,9 @@ function TxDetailModal({ tx, onClose }: { tx: Transaction; onClose: () => void }
 
 /* ── Payment Confirm Modal ── */
 function PaymentConfirmModal({ result, receiver, amount, onClose }: {
-  result: { success: boolean; transactionId?: string; status?: string; hopCount?: number; payload?: string };
+  result: { success: boolean; transactionId?: string; status?: string; hopCount?: number; payload?: string; idempotencyKey?: string; encryptedPayload?: string; lifecycleState?: string };
   receiver: string; amount: string; onClose: () => void
 }) {
-  const fakeAES = btoa(`AES256:${result.transactionId || 'pending'}:${Date.now()}`).substring(0, 64) + '...'
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-card" onClick={e => e.stopPropagation()}>
@@ -139,15 +145,22 @@ function PaymentConfirmModal({ result, receiver, amount, onClose }: {
           <div className="conf-rows">
             {result.transactionId && <div className="conf-row"><span className="conf-row-label">Transaction ID</span><span className="conf-row-val mono-sm">{result.transactionId.substring(0, 16)}…</span></div>}
             {result.status && <div className="conf-row"><span className="conf-row-label">Status</span><span className={getBadgeClass(result.status)}>{getBadgeLabel(result.status)}</span></div>}
+            {result.lifecycleState && <div className="conf-row"><span className="conf-row-label">Lifecycle</span><span className="conf-row-val mono-sm">{result.lifecycleState}</span></div>}
             {result.hopCount !== undefined && <div className="conf-row"><span className="conf-row-label">Network Hops</span><span className="conf-row-val">{result.hopCount}</span></div>}
           </div>
           {result.success && (
             <>
               <hr className="conf-divider" />
               <div className="enc-box">
-                <div className="enc-header"><ShieldCheck size={14} /> AES-256 Encrypted Payload</div>
-                <div className="enc-payload">{fakeAES}</div>
+                <div className="enc-header"><ShieldCheck size={14} /> AES-256-GCM + RSA-OAEP Encrypted Payload</div>
+                <div className="enc-payload">{result.encryptedPayload ? result.encryptedPayload.substring(0, 88) + '…' : 'unavailable'}</div>
               </div>
+              {result.idempotencyKey && (
+                <div className="enc-box" style={{ marginTop: 10 }}>
+                  <div className="enc-header"><ShieldCheck size={14} /> Idempotency Key (SHA-256 of ciphertext)</div>
+                  <div className="enc-payload">{result.idempotencyKey}</div>
+                </div>
+              )}
             </>
           )}
           {!result.success && result.payload && (
@@ -189,7 +202,8 @@ function App() {
   const [note, setNote] = useState('')
   const [sendingPayment, setSendingPayment] = useState(false)
   const [paymentResult, setPaymentResult] = useState<{
-    success: boolean; transactionId?: string; status?: string; hopCount?: number; payload?: string
+    success: boolean; transactionId?: string; status?: string; hopCount?: number; payload?: string;
+    idempotencyKey?: string; encryptedPayload?: string; lifecycleState?: string
   } | null>(null)
   const [showPayConfirm, setShowPayConfirm] = useState(false)
   const [lastReceiver, setLastReceiver] = useState('')
@@ -350,9 +364,12 @@ function App() {
     setSendingPayment(true)
     try {
       const r = await fetchWithAuth('/api/payment/send', { method: 'POST', body: JSON.stringify({ receiver, amount: amt, category, note: note || undefined }) })
-      const result = await parseJsonResponse<ApiResponse<{ transactionId: string; status: string; hopCount: number }>>(r)
+      const result = await parseJsonResponse<ApiResponse<{ transactionId: string; status: string; hopCount: number; idempotencyKey?: string; encryptedPayload?: string; lifecycleState?: string }>>(r)
       if (r.ok && result?.success && result.data) {
-        setPaymentResult({ success: true, transactionId: result.data.transactionId, status: result.data.status, hopCount: result.data.hopCount })
+        setPaymentResult({
+          success: true, transactionId: result.data.transactionId, status: result.data.status, hopCount: result.data.hopCount,
+          idempotencyKey: result.data.idempotencyKey, encryptedPayload: result.data.encryptedPayload, lifecycleState: result.data.lifecycleState
+        })
         addToast('Payment saved offline!', 'success')
         setReceiver(''); setAmount(''); setNote(''); fetchWallet()
       } else {
@@ -462,47 +479,80 @@ function App() {
 
   /* ── AUTH SCREEN ── */
   if (!token) {
+    const heroFeatures = [
+      { icon: <Wifi size={18} />, title: 'Works Offline', desc: 'Pay without internet using mesh networking.' },
+      { icon: <Shield size={18} />, title: 'Secure Encryption', desc: 'End-to-end AES-256-GCM + RSA-OAEP.' },
+      { icon: <Radio size={18} />, title: 'Peer-to-Peer Mesh', desc: 'Transactions travel across nearby devices.' },
+      { icon: <ShieldCheck size={18} />, title: 'Exactly Once', desc: 'Idempotency protection prevents duplicates.' },
+      { icon: <Users size={18} />, title: 'Split & Settle', desc: 'Easily split bills with friends.' },
+      { icon: <RefreshCw size={18} />, title: 'Sync When Online', desc: 'Auto-settles with bank on reconnect.' },
+    ]
     return (
       <div className="auth-root">
-        <div className="auth-orbs" />
-        <div className="auth-card">
-          <div className="auth-logo-wrap">
-            <div className="auth-logo"><Zap size={28} /></div>
-            <div className="auth-brand">OfflineUPI</div>
-            <div className="auth-tagline">Pay anyone, anywhere — even without internet</div>
-          </div>
-
-          <form onSubmit={handleAuth}>
-            <div className="form-group">
-              <label className="form-label">Username</label>
-              <div className="input-wrap">
-                <User size={15} className="input-icon-l" />
-                <input className="field" type="text" placeholder="Enter username"
-                  value={authUsername} onChange={e => setAuthUsername(e.target.value)} autoComplete="username" required />
-              </div>
+        {/* ── Left hero ── */}
+        <div className="auth-hero">
+          <div className="auth-hero-petals" />
+          <div className="auth-hero-brand">
+            <div className="auth-hero-logo"><Zap size={22} /></div>
+            <div>
+              <div className="auth-hero-appname">OfflineUPI</div>
+              <div className="auth-hero-tagline">Pay Beyond Connectivity</div>
             </div>
-            <div className="form-group">
-              <label className="form-label">Password</label>
-              <div className="input-wrap">
-                <Lock size={15} className="input-icon-l" />
-                <input className="field" type="password" placeholder="••••••••"
-                  value={authPassword} onChange={e => setAuthPassword(e.target.value)} autoComplete="current-password" required />
-              </div>
-            </div>
-            {!isLogin && <div className="auth-hint-box">New accounts start with ₹10,000 wallet balance</div>}
-            <button type="submit" className="btn btn-violet btn-full" style={{ marginTop: 4 }}>
-              {isLogin ? 'Sign In' : 'Create Account'}
-            </button>
-          </form>
-
-          <div className="auth-switch">
-            {isLogin ? <>New here?<button className="auth-switch-btn" onClick={() => setIsLogin(false)}>Create account</button></>
-              : <>Have an account?<button className="auth-switch-btn" onClick={() => setIsLogin(true)}>Sign in</button></>}
           </div>
-          <div className="auth-demo">
-            Demo: <strong>user</strong> / <strong>password</strong> &nbsp;·&nbsp; <strong>admin</strong> / <strong>password</strong>
+          <h1 className="auth-hero-heading">Offline Payments.<br />Real Connections.</h1>
+          <p className="auth-hero-sub">Fast. Secure. Anywhere.</p>
+          <div className="auth-features-grid">
+            {heroFeatures.map((f, i) => (
+              <div key={i} className="auth-feature-card">
+                <div className="auth-feature-icon">{f.icon}</div>
+                <div className="auth-feature-title">{f.title}</div>
+                <div className="auth-feature-desc">{f.desc}</div>
+              </div>
+            ))}
           </div>
         </div>
+
+        {/* ── Right card ── */}
+        <div className="auth-panel">
+          <div className="auth-card">
+            <div className="auth-card-header">
+              <div className="auth-card-title">{isLogin ? 'Welcome Back' : 'Create Account'}</div>
+              <div className="auth-card-sub">{isLogin ? 'Sign in to continue' : 'Start your journey'}</div>
+            </div>
+
+            <form onSubmit={handleAuth}>
+              <div className="form-group">
+                <label className="form-label">Username</label>
+                <div className="input-wrap">
+                  <User size={15} className="input-icon-l" />
+                  <input className="field" type="text" placeholder="Enter username"
+                    value={authUsername} onChange={e => setAuthUsername(e.target.value)} autoComplete="username" required />
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Password</label>
+                <div className="input-wrap">
+                  <Lock size={15} className="input-icon-l" />
+                  <input className="field" type="password" placeholder="••••••••"
+                    value={authPassword} onChange={e => setAuthPassword(e.target.value)} autoComplete="current-password" required />
+                </div>
+              </div>
+              {!isLogin && <div className="auth-hint-box">New accounts start with ₹10,000 wallet balance</div>}
+              <button type="submit" className="btn btn-violet btn-full" style={{ marginTop: 4 }}>
+                {isLogin ? 'Sign In' : 'Create Account'}
+              </button>
+            </form>
+
+            <div className="auth-switch">
+              {isLogin ? <>New here?<button className="auth-switch-btn" onClick={() => setIsLogin(false)}>Create account</button></>
+                : <>Have an account?<button className="auth-switch-btn" onClick={() => setIsLogin(true)}>Sign in</button></>}
+            </div>
+            <div className="auth-demo">
+              Demo: <strong>user</strong> / <strong>password</strong> &nbsp;·&nbsp; <strong>admin</strong> / <strong>password</strong>
+            </div>
+          </div>
+        </div>
+
         <Toasts />
       </div>
     )
@@ -605,10 +655,10 @@ function App() {
             {/* Quick actions */}
             <div className="quick-grid">
               {[
-                { id: 'send' as Tab, label: 'Pay', icon: <Send size={20} />, color: '#6366f1', bg: 'rgba(99,102,241,0.15)' },
-                { id: 'split' as Tab, label: 'Split', icon: <Users size={20} />, color: '#a855f7', bg: 'rgba(168,85,247,0.15)' },
-                { id: 'bills' as Tab, label: 'Bills', icon: <Receipt size={20} />, color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
-                { id: 'history' as Tab, label: 'History', icon: <History size={20} />, color: '#22d3ee', bg: 'rgba(34,211,238,0.15)' },
+                { id: 'send' as Tab, label: 'Pay', icon: <Send size={20} />, color: '#e85d8a', bg: 'rgba(232,93,138,0.12)' },
+                { id: 'split' as Tab, label: 'Split', icon: <Users size={20} />, color: '#9b5fc0', bg: 'rgba(155,95,192,0.12)' },
+                { id: 'bills' as Tab, label: 'Bills', icon: <Receipt size={20} />, color: '#c9842a', bg: 'rgba(201,132,42,0.12)' },
+                { id: 'history' as Tab, label: 'History', icon: <History size={20} />, color: '#1e9cb5', bg: 'rgba(30,156,181,0.12)' },
               ].map(qa => (
                 <button key={qa.id} className="qa-btn" onClick={() => setCurrentTab(qa.id)}>
                   <div className="qa-icon" style={{ background: qa.bg, color: qa.color }}>{qa.icon}</div>
@@ -621,7 +671,7 @@ function App() {
             {monthlySummary && (
               <div className="glass panel">
                 <div className="section-head">
-                  <Calendar size={18} className="section-icon" />
+                  <Calendar size={18} style={{ color: 'var(--pink-500)' }} />
                   <h2>{monthlySummary.month} Summary</h2>
                 </div>
                 <div className="summary-3">
@@ -631,7 +681,7 @@ function App() {
                 </div>
                 {Object.keys(monthlySummary.categoryBreakdown).length > 0 && (
                   <>
-                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 12 }}>Spending by category</p>
+                    <p style={{ fontSize: 12, color: 'var(--charcoal-400)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 12 }}>Spending by category</p>
                     {Object.entries(monthlySummary.categoryBreakdown).map(([cat, amt]) => (
                       <div key={cat} className="cat-row">
                         <span className="cat-name">{cat}</span>
@@ -691,13 +741,13 @@ function App() {
 
             {/* Security panel */}
             <div className="glass panel">
-              <div className="section-head"><ShieldCheck size={18} style={{ color: 'var(--cyan)' }} /><h2>Security</h2></div>
-              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 18 }}>
+              <div className="section-head"><ShieldCheck size={18} style={{ color: 'var(--pink-500)' }} /><h2>Security</h2></div>
+              <p style={{ fontSize: 13, color: 'var(--charcoal-400)', marginBottom: 18 }}>
                 Transactions are AES-256 encrypted before being stored locally, then synced when connectivity returns.
               </p>
               <div className="security-idle">
                 <div className="sec-icon-ring"><Shield size={26} /></div>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-secondary)' }}>End-to-end encrypted</span>
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--charcoal-500)' }}>End-to-end encrypted</span>
                 <div className="sec-features">
                   {[
                     { icon: <LockIcon size={14} />, label: 'AES-256 payload encryption' },
@@ -716,8 +766,8 @@ function App() {
         {/* ── SPLIT ── */}
         {currentTab === 'split' && (
           <div className="split-wrap glass panel">
-            <div className="section-head"><Users size={18} style={{ color: '#a855f7' }} /><h2>Split Expense</h2></div>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20 }}>
+            <div className="section-head"><Users size={18} style={{ color: 'var(--violet)' }} /><h2>Split Expense</h2></div>
+            <p style={{ fontSize: 13, color: 'var(--charcoal-400)', marginBottom: 20 }}>
               Split a bill equally. Each person's share is deducted from their wallet.
             </p>
             <form onSubmit={handleSplit}>
@@ -905,7 +955,7 @@ function App() {
           <div>
             <div className="glass admin-sync-bar">
               <div className="sync-info">
-                <h3><Radio size={16} style={{ display: 'inline', marginRight: 8, color: 'var(--violet)' }} />Sync Console</h3>
+                <h3><Radio size={16} style={{ display: 'inline', marginRight: 8, color: 'var(--pink-500)' }} />Sync Console</h3>
                 <p>Process all pending offline transactions when connectivity is restored.</p>
               </div>
               <button onClick={handleSync} disabled={syncing} className={`btn btn-violet ${!syncing ? 'btn-sync-pulse' : ''}`}>
@@ -919,14 +969,14 @@ function App() {
               <>
                 <div className="metrics-grid">
                   {[
-                    { label: 'Total', value: stats.totalTransactions, icon: <History size={14} /> },
+                    { label: 'Total', value: stats.totalTransactions, icon: <History size={14} />, color: 'var(--charcoal-800)' },
                     { label: 'Pending', value: stats.pendingCount, icon: <Radio size={14} />, color: 'var(--amber)' },
                     { label: 'Synced', value: stats.syncedCount, icon: <CheckCircle2 size={14} />, color: 'var(--green)' },
                     { label: 'Failed', value: stats.failedCount, icon: <XCircle size={14} />, color: 'var(--rose)' },
                   ].map(m => (
                     <div key={m.label} className="glass metric-card">
-                      <div className="metric-label"><span>{m.label}</span><span style={{ color: m.color || 'var(--text-secondary)' }}>{m.icon}</span></div>
-                      <div className="metric-val" style={{ color: m.color || 'white' }}>{m.value}</div>
+                      <div className="metric-label"><span>{m.label}</span><span style={{ color: m.color || 'var(--charcoal-400)' }}>{m.icon}</span></div>
+                      <div className="metric-val" style={{ color: m.color || 'var(--charcoal-800)' }}>{m.value}</div>
                     </div>
                   ))}
                   <div className="glass metric-card span-2">
@@ -942,7 +992,7 @@ function App() {
 
                 {Object.keys(stats.dailyTransactions).length > 0 && (
                   <div className="glass chart-wrap">
-                    <div className="section-head"><BarChart3 size={18} className="section-icon" /><h2>Daily Activity</h2></div>
+                    <div className="section-head"><BarChart3 size={18} style={{ color: 'var(--pink-500)' }} /><h2>Daily Activity</h2></div>
                     <div className="bar-chart">
                       {Object.entries(stats.dailyTransactions).slice(-7).map(([day, count]) => (
                         <div key={day} className="bar-item">
@@ -958,6 +1008,8 @@ function App() {
             ) : (
               <div className="empty-state"><Info size={28} /><span className="empty-label">Failed to load stats</span></div>
             )}
+
+            <MeshPanel fetchWithAuth={fetchWithAuth} addToast={addToast} />
           </div>
         )}
       </main>
